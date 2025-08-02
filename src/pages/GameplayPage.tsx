@@ -1,5 +1,5 @@
 import { ExerciseTemplate, GameSession } from '../types';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 interface FormFeedback {
   id: string;
@@ -17,11 +17,134 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
   const [score, setScore] = useState(0);
   const [currentRep, setCurrentRep] = useState(0);
   const [sessionStartTime, setSessionStartTime] = useState(Date.now());
+  const [filledBlocks, setFilledBlocks] = useState(0);
+  const [backgroundImage, setBackgroundImage] = useState<string | null>(null);
+  const [isCanvasComplete, setIsCanvasComplete] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  
   const [formFeedback, setFormFeedback] = useState<FormFeedback[]>([
     { id: 'posture', message: 'Good posture', status: 'green', points: 3 },
     { id: 'arms', message: 'Lift arms higher', status: 'yellow', points: 1 },
     { id: 'speed', message: 'Good speed', status: 'green', points: 3 }
   ]);
+
+  const GRID_SIZE = 10;
+  const TOTAL_BLOCKS = GRID_SIZE * GRID_SIZE;
+  const BLOCK_SIZE = 40; // 40px per block for 400x400 canvas
+
+  // Fetch random background image
+  useEffect(() => {
+    const fetchBackgroundImage = async () => {
+      try {
+        const response = await fetch('https://source.unsplash.com/random/400x400?fitness,exercise');
+        if (response.ok) {
+          setBackgroundImage(response.url);
+        }
+      } catch (error) {
+        console.log('Could not fetch background image, using default');
+      }
+    };
+    
+    fetchBackgroundImage();
+  }, []);
+
+  // Initialize canvas
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Set canvas size
+    canvas.width = GRID_SIZE * BLOCK_SIZE;
+    canvas.height = GRID_SIZE * BLOCK_SIZE;
+
+    // Draw grid
+    drawGrid(ctx);
+  }, []);
+
+  // Draw the grid structure
+  const drawGrid = (ctx: CanvasRenderingContext2D) => {
+    ctx.strokeStyle = '#e5e7eb';
+    ctx.lineWidth = 1;
+    
+    for (let i = 0; i <= GRID_SIZE; i++) {
+      // Vertical lines
+      ctx.beginPath();
+      ctx.moveTo(i * BLOCK_SIZE, 0);
+      ctx.lineTo(i * BLOCK_SIZE, GRID_SIZE * BLOCK_SIZE);
+      ctx.stroke();
+      
+      // Horizontal lines
+      ctx.beginPath();
+      ctx.moveTo(0, i * BLOCK_SIZE);
+      ctx.lineTo(GRID_SIZE * BLOCK_SIZE, i * BLOCK_SIZE);
+      ctx.stroke();
+    }
+  };
+
+  // Fill random blocks based on performance
+  const fillRandomBlocks = (blocksToFill: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Get all unfilled positions (simplified approach)
+    const unfilledPositions: [number, number][] = [];
+    for (let row = 0; row < GRID_SIZE; row++) {
+      for (let col = 0; col < GRID_SIZE; col++) {
+        // Check if this position is already filled by looking at the current filled count
+        const blockIndex = row * GRID_SIZE + col;
+        if (blockIndex >= filledBlocks) {
+          unfilledPositions.push([row, col]);
+        }
+      }
+    }
+
+    // Randomly select blocks to fill
+    const blocksToSelect = Math.min(blocksToFill, unfilledPositions.length);
+    const selectedBlocks: [number, number][] = [];
+    
+    for (let i = 0; i < blocksToSelect; i++) {
+      const randomIndex = Math.floor(Math.random() * unfilledPositions.length);
+      selectedBlocks.push(unfilledPositions[randomIndex]);
+      unfilledPositions.splice(randomIndex, 1);
+    }
+
+    // Fill selected blocks with gradient colors
+    selectedBlocks.forEach(([row, col]) => {
+      const x = col * BLOCK_SIZE;
+      const y = row * BLOCK_SIZE;
+      
+      // Create gradient based on performance
+      const gradient = ctx.createLinearGradient(x, y, x + BLOCK_SIZE, y + BLOCK_SIZE);
+      gradient.addColorStop(0, '#3b82f6'); // Blue
+      gradient.addColorStop(0.5, '#8b5cf6'); // Purple
+      gradient.addColorStop(1, '#ec4899'); // Pink
+      
+      ctx.fillStyle = gradient;
+      ctx.fillRect(x, y, BLOCK_SIZE, BLOCK_SIZE);
+      
+      // Add some sparkle effect
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.fillRect(x + 5, y + 5, 3, 3);
+    });
+
+    // Update filled blocks count
+    const newFilledBlocks = filledBlocks + blocksToSelect;
+    setFilledBlocks(newFilledBlocks);
+
+    // Check if canvas is complete
+    if (newFilledBlocks >= TOTAL_BLOCKS) {
+      setIsCanvasComplete(true);
+      setTimeout(() => {
+        handleComplete();
+      }, 2000); // Show completion for 2 seconds
+    }
+  };
 
   // Calculate total possible points per evaluation
   const totalPossiblePoints = formFeedback.reduce((sum, feedback) => sum + 3, 0);
@@ -41,7 +164,20 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
     }, 0);
     
     setScore(prevScore => prevScore + currentPoints);
+    
+    // Calculate blocks to fill based on score achieved (max 9 points per interval)
+    const blocksToFill = Math.floor((currentPoints / 9) * 5); // Fill 0-5 blocks based on score (9 points = 5 blocks)
+    
+    // Fill blocks on canvas
+    fillRandomBlocks(blocksToFill);
   }, [formFeedback]);
+
+  // Calculate accuracy based on average form quality
+  const calculateAccuracy = () => {
+    const totalPoints = formFeedback.reduce((sum, feedback) => sum + feedback.points, 0);
+    const maxPossiblePoints = formFeedback.length * 3;
+    return Math.round((totalPoints / maxPossiblePoints) * 100);
+  };
 
   // Simulate form feedback changes every 2 seconds
   useEffect(() => {
@@ -82,13 +218,6 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
 
     return () => clearInterval(interval);
   }, [updateScore]);
-
-  // Calculate accuracy based on average form quality
-  const calculateAccuracy = () => {
-    const totalPoints = formFeedback.reduce((sum, feedback) => sum + feedback.points, 0);
-    const maxPossiblePoints = formFeedback.length * 3;
-    return Math.round((totalPoints / maxPossiblePoints) * 100);
-  };
 
   // Calculate elapsed time
   const getElapsedTime = () => {
@@ -197,12 +326,33 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
             
             {/* Sky Painter Game */}
             <div className="card">
-              <h3 className="text-lg font-semibold mb-3">Sky Painter</h3>
-              <div className="aspect-square bg-gradient-to-b from-blue-200 to-blue-400 rounded-lg flex items-center justify-center">
-                <div className="text-center text-white">
-                  <div className="text-3xl mb-2">🎨</div>
-                  <p className="text-sm">Paint the sky with your movements!</p>
-                </div>
+              <h3 className="text-lg font-semibold mb-3">
+                Sky Painter
+                {isCanvasComplete && (
+                  <span className="ml-2 text-green-500 text-sm">🎉 Complete!</span>
+                )}
+              </h3>
+              <div className="relative">
+                <canvas
+                  ref={canvasRef}
+                  className="w-full h-auto border border-gray-300 rounded-lg bg-white"
+                  style={{ maxWidth: '400px', maxHeight: '400px' }}
+                />
+                {isCanvasComplete && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 rounded-lg">
+                    <div className="text-center text-white">
+                      <div className="text-4xl mb-2">🎨</div>
+                      <p className="text-xl font-bold">Image Unlocked!</p>
+                      <p className="text-sm">Great job completing the exercise!</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="mt-2 text-center text-sm text-gray-600">
+                Progress: {filledBlocks}/{TOTAL_BLOCKS} blocks filled
+              </div>
+              <div className="mt-1 text-center text-xs text-physio-primary">
+                Last Score: {formFeedback.reduce((sum, feedback) => sum + feedback.points, 0)}/9 points → Filling {Math.floor((formFeedback.reduce((sum, feedback) => sum + feedback.points, 0) / 9) * 5)} blocks
               </div>
             </div>
             
