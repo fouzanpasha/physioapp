@@ -133,8 +133,13 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
           frameIndexRef.current = boundedFrameIndex;
         }
         
-        // Provide voice feedback
-        if (voiceFeedback) {
+        // Provide voice feedback only on significant events
+        if (voiceFeedback && (
+          result.debugInfo.stateChange || // State changes
+          result.repCount > currentRep || // Rep completion
+          (currentFormAnalysis && currentFormAnalysis.accuracy < 50) // Poor form
+        )) {
+          console.log('🎤 Calling voice feedback - State change:', result.debugInfo.stateChange, 'Rep count:', result.repCount, 'Accuracy:', currentFormAnalysis?.accuracy);
           voiceFeedback.provideFeedback(result, currentFormAnalysis, result.repCount, score);
         }
       } catch (error) {
@@ -183,8 +188,11 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
           
           frameIndexRef.current = boundedFrameIndex;
           
-          // Provide voice feedback for legacy system
-          if (voiceFeedback) {
+          // Provide voice feedback for legacy system only on significant events
+          if (voiceFeedback && (
+            repDetection.isRepComplete || // Rep completion
+            (analysis.accuracy < 50) // Poor form
+          )) {
             voiceFeedback.provideFeedback(null, analysis, currentRep, score);
           }
         } catch (error) {

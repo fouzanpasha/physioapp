@@ -11,7 +11,7 @@ export class VoiceFeedbackSystem {
   private currentUtterance: SpeechSynthesisUtterance | null = null;
   private config: VoiceFeedbackConfig;
   private lastFeedbackTime: number = 0;
-  private feedbackCooldown: number = 2000; // 2 seconds between feedback
+  private feedbackCooldown: number = 3000; // 3 seconds between feedback
   private repCount: number = 0;
   private lastRepCount: number = 0;
 
@@ -81,21 +81,28 @@ export class VoiceFeedbackSystem {
     if (currentRep > this.lastRepCount) {
       feedbackMessage = this.getRepCompletionFeedback(currentRep, stateMachineResult);
       this.lastRepCount = currentRep;
+      console.log('Voice: Rep completion feedback');
     }
-    // Check for state changes
-    else if (stateMachineResult?.debugInfo?.stateChange) {
+    // Check for state changes (only if not a rep completion)
+    else if (stateMachineResult?.debugInfo?.stateChange && 
+             !stateMachineResult.debugInfo.stateChange.includes('REP COMPLETE')) {
       feedbackMessage = this.getStateChangeFeedback(stateMachineResult);
+      console.log('Voice: State change feedback');
     }
-    // Check for form issues
-    else if (formAnalysis?.accuracy < 60) {
+    // Check for form issues (only if accuracy is significantly low and we have form data)
+    else if (formAnalysis && formAnalysis.accuracy !== undefined && formAnalysis.accuracy < 50) {
       feedbackMessage = this.getFormCorrectionFeedback(formAnalysis);
+      console.log('Voice: Form correction feedback');
     }
-    // Provide encouragement for good form
-    else if (formAnalysis?.accuracy > 80) {
+    // Provide encouragement for good form (only occasionally)
+    else if (formAnalysis && formAnalysis.accuracy !== undefined && formAnalysis.accuracy > 85 && 
+             Math.random() < 0.3) { // 30% chance to avoid spam
       feedbackMessage = this.getEncouragementFeedback(formAnalysis);
+      console.log('Voice: Encouragement feedback');
     }
 
     if (feedbackMessage) {
+      console.log('🎤 Voice feedback triggered:', feedbackMessage);
       this.speak(feedbackMessage);
       this.lastFeedbackTime = currentTime;
     }
@@ -120,10 +127,10 @@ export class VoiceFeedbackSystem {
     const stateChange = stateMachineResult.debugInfo.stateChange;
     
     if (stateChange.includes('Start position reached')) {
-      return 'Perfect! You\'re in the starting position. Begin the movement smoothly.';
+      return 'Good starting position. Now raise your arms smoothly.';
     }
     else if (stateChange.includes('End position reached')) {
-      return 'Good! You\'ve reached the peak position. Now return to start to complete the rep.';
+      return 'Great! Hold briefly, then lower back down.';
     }
     else if (stateChange.includes('REP COMPLETE')) {
       return 'Rep completed! Return to starting position for the next rep.';
@@ -136,11 +143,11 @@ export class VoiceFeedbackSystem {
     const accuracy = formAnalysis.accuracy;
     const feedback = formAnalysis.feedback || '';
     
-    if (accuracy < 40) {
-      return 'Check your form. Make sure you\'re following the correct movement pattern.';
+    if (accuracy < 30) {
+      return 'Your form needs work. Slow down and focus on the movement pattern.';
     }
-    else if (accuracy < 60) {
-      return 'Focus on your form. Try to match the template movement more closely.';
+    else if (accuracy < 50) {
+      return 'Try to match the template movement more closely.';
     }
     
     return feedback;
