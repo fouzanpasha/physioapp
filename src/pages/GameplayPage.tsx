@@ -1,7 +1,7 @@
 import { ExerciseTemplate, GameSession } from '../types';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { KinetiPlayCanvas } from '../components/KinetiPlayCanvas';
-import { analyzeForm, FormAnalysisResult, ExerciseTemplate as FormTemplate } from '../utils/formAnalysis';
+import { analyzeForm, FormAnalysisResult, ExerciseTemplate as FormTemplate, detectRepetition } from '../utils/formAnalysis';
 import { useExerciseRecording } from '../hooks/useExerciseRecording';
 
 // TypeScript declaration for global MediaPipe
@@ -29,8 +29,16 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
   const [countdown, setCountdown] = useState(3);
   const [debugMode, setDebugMode] = useState(false);
   
+  // New state for rep tracking
+  const [repQuality, setRepQuality] = useState<'poor' | 'good' | 'excellent'>('poor');
+  const [activeArm, setActiveArm] = useState<'left' | 'right' | 'both'>('right');
+  const [previousPhase, setPreviousPhase] = useState<string | null>(null);
+  const [lastRepTime, setLastRepTime] = useState<number>(0);
+  
   const frameIndexRef = useRef(0);
   const analysisIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const currentRepRef = useRef(0);
+  const previousPhaseRef = useRef<string | null>(null);
   
   // Recording hook
   const { recordingState, startRecording, stopRecording, recordFrame, saveTemplate } = useExerciseRecording();
@@ -43,6 +51,16 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
       setTemplate(exerciseTemplate);
     }
   }, [exercise.name]);
+
+  // Update ref when currentRep changes
+  useEffect(() => {
+    currentRepRef.current = currentRep;
+  }, [currentRep]);
+
+  // Update ref when previousPhase changes
+  useEffect(() => {
+    previousPhaseRef.current = previousPhase;
+  }, [previousPhase]);
 
   // Update score based on current form analysis
   const updateScore = useCallback((analysis: FormAnalysisResult) => {
@@ -70,6 +88,49 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
         const analysis = analyzeForm(poseLandmarks, template, boundedFrameIndex);
         setCurrentFormAnalysis(analysis);
         updateScore(analysis);
+        
+        // Update active arm
+        if (analysis.activeArm) {
+          setActiveArm(analysis.activeArm);
+        }
+        
+        // Check for repetition completion
+        const repDetection = detectRepetition(poseLandmarks, analysis, previousPhaseRef.current);
+        
+        if (repDetection.isRepComplete && currentRepRef.current < 10) {
+          // Increment rep counter (capped at 10)
+          const newRepCount = Math.min(currentRepRef.current + 1, 10);
+          currentRepRef.current = newRepCount;
+          setCurrentRep(newRepCount);
+          setRepQuality(repDetection.repQuality);
+          setLastRepTime(Date.now());
+          
+          // Add bonus points based on rep quality
+          let bonusPoints = 0;
+          switch (repDetection.repQuality) {
+            case 'excellent':
+              bonusPoints = 15;
+              break;
+            case 'good':
+              bonusPoints = 10;
+              break;
+            case 'poor':
+              bonusPoints = 5;
+              break;
+          }
+          setScore(prev => prev + bonusPoints);
+          
+          console.log(`Rep ${newRepCount} completed! Quality: ${repDetection.repQuality}, Bonus: +${bonusPoints} points`);
+          
+          // If we've reached 10 reps, show completion message
+          if (newRepCount === 10) {
+            console.log('🎉 Exercise session complete! 10 reps reached!');
+          }
+        }
+        
+        // Update previous phase for next analysis
+        previousPhaseRef.current = analysis.phase || null;
+        setPreviousPhase(analysis.phase || null);
         
         // Update frame index for next analysis
         frameIndexRef.current = boundedFrameIndex;
@@ -185,6 +246,13 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
             <div>Score: <span className="font-bold text-physio-primary">{score}</span></div>
             <div>Reps: <span className="font-bold">{currentRep}/10</span></div>
             <div>Time: <span className="font-bold">{getElapsedTime()}</span></div>
+            <div className="text-sm">
+              <div>Active Arm: <span className="font-bold capitalize">{activeArm}</span></div>
+              <div>Last Rep: <span className={`font-bold ${
+                repQuality === 'excellent' ? 'text-green-600' : 
+                repQuality === 'good' ? 'text-blue-600' : 'text-red-600'
+              }`}>{repQuality}</span></div>
+            </div>
             <button 
               onClick={() => setDebugMode(!debugMode)}
               className="text-sm bg-gray-500 text-white px-2 py-1 rounded"
@@ -356,7 +424,7 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
                   <div className="w-full bg-gray-200 rounded-full h-2">
                     <div 
                       className="bg-physio-primary h-2 rounded-full transition-all duration-300" 
-                      style={{width: `${(currentRep / 10) * 100}%`}}
+                      style={{width: `${Math.min((currentRep / 10) * 100, 100)}%`}}
                     ></div>
                   </div>
                 </div>
@@ -400,6 +468,12 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
                       {currentFormAnalysis.status.replace('_', ' ')}
                     </span>
                   </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Active Arm</span>
+                    <span className="text-xs font-bold capitalize text-blue-600">
+                      {currentFormAnalysis.activeArm || 'unknown'}
+                    </span>
+                  </div>
                   <div className="text-sm text-gray-600">
                     {currentFormAnalysis.feedback}
                   </div>
@@ -425,6 +499,14 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
                       <div className="text-xs">
                         <div>Phase: {currentFormAnalysis.phase || 'unknown'}</div>
                         <div>Progress: {currentFormAnalysis.phaseProgress || '0%'}</div>
+                        <div>Active Arm: {currentFormAnalysis.activeArm || 'unknown'}</div>
+                      </div>
+                      <div className="mt-2 font-semibold">Rep Tracking:</div>
+                      <div className="text-xs">
+                        <div>Current Rep: {currentRep}</div>
+                        <div>Last Rep Quality: {repQuality}</div>
+                        <div>Previous Phase: {previousPhase || 'none'}</div>
+                        <div>Last Rep Time: {lastRepTime > 0 ? new Date(lastRepTime).toLocaleTimeString() : 'none'}</div>
                       </div>
                       <div className="mt-2 font-semibold">Template Sample:</div>
                       {template?.frames && template.frames[0] && (
@@ -443,6 +525,31 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
               )}
             </div>
             
+            {/* Rep Quality Indicator */}
+            <div className="card">
+              <h3 className="text-lg font-semibold mb-3">Rep Quality</h3>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Current Rep</span>
+                  <span className="font-bold text-lg">{currentRep}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Last Rep Quality</span>
+                  <span className={`text-xs font-bold px-2 py-1 rounded ${
+                    repQuality === 'excellent' ? 'bg-green-100 text-green-800' :
+                    repQuality === 'good' ? 'bg-blue-100 text-blue-800' : 'bg-red-100 text-red-800'
+                  }`}>
+                    {repQuality}
+                  </span>
+                </div>
+                {lastRepTime > 0 && (
+                  <div className="text-xs text-gray-500">
+                    Last rep: {new Date(lastRepTime).toLocaleTimeString()}
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* Sky Painter Game */}
             <div className="card">
               <h3 className="text-lg font-semibold mb-3">Sky Painter</h3>

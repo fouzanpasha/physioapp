@@ -12,6 +12,8 @@ export interface FormAnalysisResult {
   };
   phase?: 'rest' | 'raising' | 'raised' | 'lowering';
   phaseProgress?: number;
+  repQuality?: 'poor' | 'good' | 'excellent';
+  activeArm?: 'left' | 'right' | 'both';
 }
 
 export interface ExerciseTemplate {
@@ -80,6 +82,7 @@ export function analyzeForm(
     exercisePhase: exerciseAnalysis.phase,
     phaseProgress: Math.round(exerciseAnalysis.phaseProgress * 100) + '%',
     accuracy: Math.round(exerciseAnalysis.accuracy),
+    activeArm: exerciseAnalysis.activeArm,
     angles: angles,
     currentLandmarks: currentKeyLandmarks.length,
     templateLandmarks: templateKeyLandmarks.length,
@@ -118,7 +121,8 @@ export function analyzeForm(
     points,
     angles,
     phase: exerciseAnalysis.phase,
-    phaseProgress: exerciseAnalysis.phaseProgress
+    phaseProgress: exerciseAnalysis.phaseProgress,
+    activeArm: exerciseAnalysis.activeArm
   };
 }
 
@@ -129,16 +133,53 @@ function analyzeExercisePhase(currentLandmarks: any[], templateFrames: any[][]):
   phase: 'rest' | 'raising' | 'raised' | 'lowering';
   phaseProgress: number;
   accuracy: number;
+  activeArm: 'left' | 'right' | 'both';
 } {
-  if (currentLandmarks.length < 5 || templateFrames.length === 0) {
-    return { phase: 'rest', phaseProgress: 0, accuracy: 0 };
+  if (currentLandmarks.length < 8 || templateFrames.length === 0) {
+    return { phase: 'rest', phaseProgress: 0, accuracy: 0, activeArm: 'right' };
   }
 
-  const currentWrist = currentLandmarks[4]; // Right wrist
-  const currentShoulder = currentLandmarks[0]; // Right shoulder
+  // Extract both arms' landmarks
+  const rightWrist = currentLandmarks[4]; // Right wrist
+  const rightShoulder = currentLandmarks[0]; // Right shoulder
+  const leftWrist = currentLandmarks[5]; // Left wrist  
+  const leftShoulder = currentLandmarks[1]; // Left shoulder
+
+  // Determine which arm is more active
+  let activeArm: 'left' | 'right' | 'both' = 'right';
+  let currentWrist = rightWrist;
+  let currentShoulder = rightShoulder;
+
+  if (rightWrist && leftWrist && rightShoulder && leftShoulder) {
+    const rightArmHeight = rightShoulder.y - rightWrist.y;
+    const leftArmHeight = leftShoulder.y - leftWrist.y;
+    
+    // Check if both arms are moving significantly
+    const rightMoving = Math.abs(rightArmHeight) > 0.1;
+    const leftMoving = Math.abs(leftArmHeight) > 0.1;
+    
+    if (rightMoving && leftMoving) {
+      activeArm = 'both';
+      // Use the arm that's higher (more active)
+      currentWrist = rightArmHeight > leftArmHeight ? rightWrist : leftWrist;
+      currentShoulder = rightArmHeight > leftArmHeight ? rightShoulder : leftShoulder;
+    } else if (leftMoving && !rightMoving) {
+      activeArm = 'left';
+      currentWrist = leftWrist;
+      currentShoulder = leftShoulder;
+    } else {
+      activeArm = 'right';
+      currentWrist = rightWrist;
+      currentShoulder = rightShoulder;
+    }
+  } else if (leftWrist && leftShoulder && (!rightWrist || !rightShoulder)) {
+    activeArm = 'left';
+    currentWrist = leftWrist;
+    currentShoulder = leftShoulder;
+  }
 
   if (!currentWrist || !currentShoulder) {
-    return { phase: 'rest', phaseProgress: 0, accuracy: 0 };
+    return { phase: 'rest', phaseProgress: 0, accuracy: 0, activeArm: 'right' };
   }
 
   // Calculate arm height relative to shoulder
@@ -178,19 +219,19 @@ function analyzeExercisePhase(currentLandmarks: any[], templateFrames: any[][]):
     accuracy = 30 + (phaseProgress * 40);
   } else if (phase === 'raised') {
     // At raised position, compare to template raised frames
-    accuracy = compareToRaisedTemplate(currentLandmarks, templateFrames);
+    accuracy = compareToRaisedTemplate(currentLandmarks, templateFrames, activeArm);
   } else if (phase === 'lowering') {
     // During lowering, accuracy should be moderate (30-70%)
     accuracy = 30 + (phaseProgress * 40);
   }
 
-  return { phase, phaseProgress, accuracy };
+  return { phase, phaseProgress, accuracy, activeArm };
 }
 
 /**
  * Compare current pose to template frames when arm is raised
  */
-function compareToRaisedTemplate(currentLandmarks: any[], templateFrames: any[][]): number {
+function compareToRaisedTemplate(currentLandmarks: any[], templateFrames: any[][], activeArm: 'left' | 'right' | 'both'): number {
   // Find template frames where arm is raised (last 30% of frames)
   const raisedFrameStart = Math.floor(templateFrames.length * 0.7);
   const raisedFrames = templateFrames.slice(raisedFrameStart);
@@ -201,12 +242,22 @@ function compareToRaisedTemplate(currentLandmarks: any[], templateFrames: any[][
   let bestAccuracy = 0;
 
   for (const templateFrame of raisedFrames) {
-    if (templateFrame.length < 5) continue;
+    if (templateFrame.length < 6) continue;
 
-    const currentWrist = currentLandmarks[4];
-    const templateWrist = templateFrame[4];
-    const currentShoulder = currentLandmarks[0];
-    const templateShoulder = templateFrame[0];
+    // Use the appropriate landmarks based on active arm
+    let currentWrist, templateWrist, currentShoulder, templateShoulder;
+    
+    if (activeArm === 'left') {
+      currentWrist = currentLandmarks[5]; // Left wrist
+      templateWrist = templateFrame[5];
+      currentShoulder = currentLandmarks[1]; // Left shoulder
+      templateShoulder = templateFrame[1];
+    } else {
+      currentWrist = currentLandmarks[4]; // Right wrist
+      templateWrist = templateFrame[4];
+      currentShoulder = currentLandmarks[0]; // Right shoulder
+      templateShoulder = templateFrame[0];
+    }
 
     if (!currentWrist || !templateWrist || !currentShoulder || !templateShoulder) continue;
 
@@ -416,34 +467,97 @@ function calculate3DDistance(point1: any, point2: any): number {
 }
 
 /**
- * Detect exercise repetition
+ * Enhanced repetition detection with quality classification
  */
 export function detectRepetition(
   poseLandmarks: any[],
-  previousAnalysis: FormAnalysisResult | null
-): { isRepComplete: boolean; repCount: number } {
-  // Simple repetition detection based on arm position
+  previousAnalysis: FormAnalysisResult | null,
+  previousPhase: string | null
+): { 
+  isRepComplete: boolean; 
+  repCount: number; 
+  repQuality: 'poor' | 'good' | 'excellent';
+  activeArm: 'left' | 'right' | 'both';
+} {
   if (!poseLandmarks || poseLandmarks.length < 16) {
-    return { isRepComplete: false, repCount: 0 };
+    return { isRepComplete: false, repCount: 0, repQuality: 'poor', activeArm: 'right' };
   }
 
   const rightWrist = poseLandmarks[15];
   const rightShoulder = poseLandmarks[11];
+  const leftWrist = poseLandmarks[16];
+  const leftShoulder = poseLandmarks[12];
 
-  if (!rightWrist || !rightShoulder) {
-    return { isRepComplete: false, repCount: 0 };
+  // Determine which arm is active
+  let activeArm: 'left' | 'right' | 'both' = 'right';
+  let currentWrist = rightWrist;
+  let currentShoulder = rightShoulder;
+
+  if (rightWrist && leftWrist && rightShoulder && leftShoulder) {
+    const rightArmHeight = rightShoulder.y - rightWrist.y;
+    const leftArmHeight = leftShoulder.y - leftWrist.y;
+    
+    const rightMoving = Math.abs(rightArmHeight) > 0.1;
+    const leftMoving = Math.abs(leftArmHeight) > 0.1;
+    
+    if (rightMoving && leftMoving) {
+      activeArm = 'both';
+      currentWrist = rightArmHeight > leftArmHeight ? rightWrist : leftWrist;
+      currentShoulder = rightArmHeight > leftArmHeight ? rightShoulder : leftShoulder;
+    } else if (leftMoving && !rightMoving) {
+      activeArm = 'left';
+      currentWrist = leftWrist;
+      currentShoulder = leftShoulder;
+    } else {
+      activeArm = 'right';
+      currentWrist = rightWrist;
+      currentShoulder = rightShoulder;
+    }
+  } else if (leftWrist && leftShoulder && (!rightWrist || !rightShoulder)) {
+    activeArm = 'left';
+    currentWrist = leftWrist;
+    currentShoulder = leftShoulder;
+  }
+
+  if (!currentWrist || !currentShoulder) {
+    return { isRepComplete: false, repCount: 0, repQuality: 'poor', activeArm: 'right' };
   }
 
   // Check if wrist is above shoulder (exercise completed)
-  const isArmRaised = rightWrist.y < rightShoulder.y;
+  const isArmRaised = currentWrist.y < currentShoulder.y;
+  const armHeight = currentShoulder.y - currentWrist.y;
 
-  // Simple state machine for repetition detection
-  // This is a basic implementation - could be enhanced with more sophisticated logic
-  if (isArmRaised && previousAnalysis && previousAnalysis.accuracy > 70) {
-    return { isRepComplete: true, repCount: 1 };
+  // Enhanced repetition detection with state tracking
+  let isRepComplete = false;
+  let repQuality: 'poor' | 'good' | 'excellent' = 'poor';
+
+  // Check if we've completed a full cycle: rest -> raised -> rest
+  if (previousPhase && previousAnalysis) {
+    const wasRaised = previousPhase === 'raised';
+    const wasRaising = previousPhase === 'raising';
+    const isResting = armHeight < 0.1;
+    
+    // Rep is complete if we were raised and now we're resting
+    if (wasRaised && isResting) {
+      isRepComplete = true;
+      
+      // Determine rep quality based on accuracy during the raised phase
+      if (previousAnalysis.accuracy >= 85) {
+        repQuality = 'excellent';
+      } else if (previousAnalysis.accuracy >= 70) {
+        repQuality = 'good';
+      } else {
+        repQuality = 'poor';
+      }
+    }
   }
 
-  return { isRepComplete: false, repCount: 0 };
+  return { 
+    isRepComplete, 
+    repCount: isRepComplete ? 1 : 0, 
+    repQuality,
+    activeArm
+  };
 }
 
 /**

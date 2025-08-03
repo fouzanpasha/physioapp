@@ -21,9 +21,15 @@ interface KinetiPlayCanvasProps {
 export const KinetiPlayCanvas = ({ onPoseData, shouldInitialize = true }: KinetiPlayCanvasProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const onPoseDataRef = useRef(onPoseData);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [poseResults, setPoseResults] = useState<any>(null);
+
+  // Update the ref when onPoseData changes
+  useEffect(() => {
+    onPoseDataRef.current = onPoseData;
+  }, [onPoseData]);
 
   useEffect(() => {
     let pose: any = null;
@@ -83,8 +89,8 @@ export const KinetiPlayCanvas = ({ onPoseData, shouldInitialize = true }: Kineti
               setPoseResults(results);
               setIsLoading(false);
               
-              if (onPoseData && results.poseLandmarks) {
-                onPoseData(results.poseLandmarks);
+              if (onPoseDataRef.current && results.poseLandmarks) {
+                onPoseDataRef.current(results.poseLandmarks);
               }
             });
 
@@ -125,7 +131,7 @@ export const KinetiPlayCanvas = ({ onPoseData, shouldInitialize = true }: Kineti
         stream.getTracks().forEach(track => track.stop());
       }
     };
-  }, [shouldInitialize, onPoseData]);
+  }, [shouldInitialize]);
 
   // Draw pose results
   useEffect(() => {
@@ -194,36 +200,73 @@ export const KinetiPlayCanvas = ({ onPoseData, shouldInitialize = true }: Kineti
           canvasCtx.fillText(`Elbow: ${Math.round(leftAngle)}°`, 10, 60);
         }
 
-        // Draw wrist position indicator (most important for accuracy)
-        if (wrist) {
+        // Draw both wrists with different colors
+        const rightWrist = landmarks[15];
+        const rightShoulder = landmarks[11];
+
+        // Right wrist (red)
+        if (rightWrist) {
           canvasCtx.beginPath();
           canvasCtx.arc(
-            wrist.x * canvasRef.current.width,
-            wrist.y * canvasRef.current.height,
+            rightWrist.x * canvasRef.current.width,
+            rightWrist.y * canvasRef.current.height,
             8,
             0,
             2 * Math.PI
           );
           canvasCtx.fillStyle = "red";
           canvasCtx.fill();
-          canvasCtx.font = "16px Arial";
+          canvasCtx.font = "14px Arial";
           canvasCtx.fillStyle = "red";
-          canvasCtx.fillText(`Wrist: (${wrist.x.toFixed(2)}, ${wrist.y.toFixed(2)})`, 10, 90);
+          canvasCtx.fillText(`R: (${rightWrist.x.toFixed(2)}, ${rightWrist.y.toFixed(2)})`, 10, 90);
         }
 
-        // Draw exercise phase indicator
-        const armHeight = shoulder ? shoulder.y - wrist.y : 0;
-        const armHeightPercent = Math.max(0, Math.min(1, (armHeight + 0.2) / 0.4));
-        
-        let phase = 'rest';
-        if (armHeightPercent >= 0.1 && armHeightPercent < 0.7) phase = 'raising';
-        else if (armHeightPercent >= 0.7 && armHeightPercent < 0.9) phase = 'raised';
-        else if (armHeightPercent >= 0.9) phase = 'lowering';
+        // Left wrist (blue)
+        if (leftWrist) {
+          canvasCtx.beginPath();
+          canvasCtx.arc(
+            leftWrist.x * canvasRef.current.width,
+            leftWrist.y * canvasRef.current.height,
+            8,
+            0,
+            2 * Math.PI
+          );
+          canvasCtx.fillStyle = "blue";
+          canvasCtx.fill();
+          canvasCtx.font = "14px Arial";
+          canvasCtx.fillStyle = "blue";
+          canvasCtx.fillText(`L: (${leftWrist.x.toFixed(2)}, ${leftWrist.y.toFixed(2)})`, 10, 110);
+        }
 
-        canvasCtx.font = "20px Arial";
-        canvasCtx.fillStyle = phase === 'raised' ? "green" : phase === 'raising' ? "orange" : "gray";
-        canvasCtx.fillText(`Phase: ${phase.toUpperCase()}`, 10, 120);
-        canvasCtx.fillText(`Height: ${Math.round(armHeightPercent * 100)}%`, 10, 145);
+        // Draw exercise phase indicator (using the more active arm)
+        let activeWrist = rightWrist;
+        let activeShoulder = rightShoulder;
+        
+        if (rightWrist && leftWrist && rightShoulder && leftShoulder) {
+          const rightArmHeight = rightShoulder.y - rightWrist.y;
+          const leftArmHeight = leftShoulder.y - leftWrist.y;
+          
+          // Use the arm that's higher (more active)
+          if (leftArmHeight > rightArmHeight) {
+            activeWrist = leftWrist;
+            activeShoulder = leftShoulder;
+          }
+        }
+
+        if (activeWrist && activeShoulder) {
+          const armHeight = activeShoulder.y - activeWrist.y;
+          const armHeightPercent = Math.max(0, Math.min(1, (armHeight + 0.2) / 0.4));
+          
+          let phase = 'rest';
+          if (armHeightPercent >= 0.1 && armHeightPercent < 0.7) phase = 'raising';
+          else if (armHeightPercent >= 0.7 && armHeightPercent < 0.9) phase = 'raised';
+          else if (armHeightPercent >= 0.9) phase = 'lowering';
+
+          canvasCtx.font = "20px Arial";
+          canvasCtx.fillStyle = phase === 'raised' ? "green" : phase === 'raising' ? "orange" : "gray";
+          canvasCtx.fillText(`Phase: ${phase.toUpperCase()}`, 10, 130);
+          canvasCtx.fillText(`Height: ${Math.round(armHeightPercent * 100)}%`, 10, 155);
+        }
       }
 
       canvasCtx.restore();
