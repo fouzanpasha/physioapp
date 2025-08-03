@@ -344,9 +344,20 @@ export class VoiceFeedbackSystem {
   }
 
   public stop() {
+    // Stop all speech synthesis
     this.speechSynthesis.cancel();
+    this.speechSynthesis.pause();
+    
+    // Stop Gemini voice
     this.geminiVoice.stop();
+    
+    // Clear current utterance
     this.currentUtterance = null;
+    
+    // Reset feedback timing to prevent immediate re-triggering
+    this.lastFeedbackTime = 0;
+    
+    console.log('🔇 Voice feedback stopped');
   }
 
   public pause() {

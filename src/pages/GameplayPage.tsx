@@ -35,6 +35,7 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
   const [geminiVoiceEnabled, setGeminiVoiceEnabled] = useState(true); // New state for Gemini voice
   const [geminiApiKey, setGeminiApiKey] = useState('AIzaSyBWXLZirnMBowVOMDBezhptKHfIAanGs58'); // State for API key
   const [showApiKeyInput, setShowApiKeyInput] = useState(false); // Toggle API key input visibility
+  const [instructionsPlayed, setInstructionsPlayed] = useState(false); // Track if instructions were already played
   
   // State machine for rep tracking
   const [stateMachine, setStateMachine] = useState<RepetitionStateMachine | null>(null);
@@ -99,10 +100,13 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
         });
         setVoiceFeedback(newVoiceFeedback);
         
-        // Provide exercise instructions after a short delay
-        setTimeout(() => {
-          newVoiceFeedback.provideExerciseInstructions(exercise.name);
-        }, 1000);
+        // Provide exercise instructions only once after a short delay
+        if (!instructionsPlayed) {
+          setTimeout(() => {
+            newVoiceFeedback.provideExerciseInstructions(exercise.name);
+            setInstructionsPlayed(true);
+          }, 1000);
+        }
       } else {
         console.warn('No template found for exercise:', exercise.name);
       }
@@ -110,6 +114,42 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
     
     loadTemplate();
   }, [exercise.name, voiceFeedbackEnabled, geminiVoiceEnabled, geminiApiKey]);
+
+  // Reset instructions flag when exercise changes
+  useEffect(() => {
+    setInstructionsPlayed(false);
+  }, [exercise.name]);
+
+  // Cleanup voice feedback when component unmounts or user navigates away
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden && voiceFeedback) {
+        console.log('🔇 Page hidden, stopping voice feedback');
+        voiceFeedback.stop();
+      }
+    };
+
+    const handleBeforeUnload = () => {
+      if (voiceFeedback) {
+        console.log('🔇 Page unloading, stopping voice feedback');
+        voiceFeedback.stop();
+      }
+    };
+
+    // Add event listeners
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    // Cleanup function
+    return () => {
+      if (voiceFeedback) {
+        console.log('🔇 Component unmounting, stopping voice feedback');
+        voiceFeedback.stop();
+      }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [voiceFeedback]);
 
   // Update score based on current form analysis
   const updateScore = useCallback((analysis: FormAnalysisResult) => {
