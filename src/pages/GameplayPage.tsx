@@ -4,7 +4,6 @@ import { KinetiPlayCanvas } from '../components/KinetiPlayCanvas';
 import { analyzeForm, FormAnalysisResult, ExerciseTemplate as FormTemplate, detectRepetition } from '../utils/formAnalysis';
 import { RepetitionStateMachine, StateMachineResult } from '../utils/stateMachineAnalysis';
 import { VoiceFeedbackSystem } from '../utils/voiceFeedback';
-import { analyzeSimpleForm, SimpleFormResult } from '../utils/simpleFormAnalysis';
 import { useExerciseRecording } from '../hooks/useExerciseRecording';
 
 // TypeScript declaration for global MediaPipe
@@ -33,7 +32,6 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
   const [debugMode, setDebugMode] = useState(false);
   const [useStateMachine, setUseStateMachine] = useState(true); // Toggle between state machine and old system
   const [voiceFeedbackEnabled, setVoiceFeedbackEnabled] = useState(true);
-  const [useSimpleFormAnalysis, setUseSimpleFormAnalysis] = useState(true); // Toggle between simple and complex form analysis
   
   // State machine for rep tracking
   const [stateMachine, setStateMachine] = useState<RepetitionStateMachine | null>(null);
@@ -44,7 +42,6 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
   const [repQuality, setRepQuality] = useState<'poor' | 'good' | 'excellent'>('poor');
   const [activeArm, setActiveArm] = useState<'left' | 'right' | 'both'>('right');
   const [lastRepTime, setLastRepTime] = useState<number>(0);
-  const [simpleFormResult, setSimpleFormResult] = useState<SimpleFormResult | null>(null);
   
   const frameIndexRef = useRef(0);
   const analysisIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -54,31 +51,53 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
 
   // Load template and initialize state machine on component mount
   useEffect(() => {
-    const templates = JSON.parse(localStorage.getItem('exerciseTemplates') || '{}');
-    const exerciseTemplate = templates[exercise.name];
-    if (exerciseTemplate) {
-      setTemplate(exerciseTemplate);
+    const loadTemplate = async () => {
+      // First try to load from localStorage
+      const templates = JSON.parse(localStorage.getItem('exerciseTemplates') || '{}');
+      let exerciseTemplate = templates[exercise.name];
       
-      // Initialize state machine with template
-      const newStateMachine = new RepetitionStateMachine(exerciseTemplate);
-      setStateMachine(newStateMachine);
-      console.log('State Machine initialized for exercise:', exercise.name);
+      // If not in localStorage, try to load from file
+      if (!exerciseTemplate) {
+        try {
+          console.log('Loading template from file for:', exercise.name);
+          const response = await fetch('/src/data/shoulder_abduction_template.json');
+          if (response.ok) {
+            exerciseTemplate = await response.json();
+            console.log('Template loaded from file:', exerciseTemplate);
+          }
+        } catch (error) {
+          console.error('Failed to load template from file:', error);
+        }
+      }
       
-      // Initialize voice feedback
-      const newVoiceFeedback = new VoiceFeedbackSystem({
-        enabled: voiceFeedbackEnabled,
-        volume: 0.8,
-        rate: 0.9,
-        pitch: 1.0,
-        voiceType: 'neutral'
-      });
-      setVoiceFeedback(newVoiceFeedback);
-      
-      // Provide exercise instructions after a short delay
-      setTimeout(() => {
-        newVoiceFeedback.provideExerciseInstructions(exercise.name);
-      }, 1000);
-    }
+      if (exerciseTemplate) {
+        setTemplate(exerciseTemplate);
+        
+        // Initialize state machine with template
+        const newStateMachine = new RepetitionStateMachine(exerciseTemplate);
+        setStateMachine(newStateMachine);
+        console.log('State Machine initialized for exercise:', exercise.name);
+        
+        // Initialize voice feedback
+        const newVoiceFeedback = new VoiceFeedbackSystem({
+          enabled: voiceFeedbackEnabled,
+          volume: 0.8,
+          rate: 0.9,
+          pitch: 1.0,
+          voiceType: 'neutral'
+        });
+        setVoiceFeedback(newVoiceFeedback);
+        
+        // Provide exercise instructions after a short delay
+        setTimeout(() => {
+          newVoiceFeedback.provideExerciseInstructions(exercise.name);
+        }, 1000);
+      } else {
+        console.warn('No template found for exercise:', exercise.name);
+      }
+    };
+    
+    loadTemplate();
   }, [exercise.name, voiceFeedbackEnabled]);
 
   // Update score based on current form analysis
@@ -103,11 +122,6 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
     if (recordingState.isRecording) {
       recordFrame(poseLandmarks);
     }
-
-    // Run simple form analysis for real-time feedback
-    const simpleFormResult = analyzeSimpleForm(poseLandmarks);
-    setSimpleFormResult(simpleFormResult);
-    console.log('🎯 Simple Form Result:', simpleFormResult);
 
     if (useStateMachine && stateMachine) {
       // Use state machine for rep detection and form analysis
@@ -134,6 +148,10 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
           
           if (result.repCount >= 10) {
             console.log('🎉 Exercise session complete! 10 reps reached!');
+            // Auto-complete the session after a short delay
+            setTimeout(() => {
+              handleComplete();
+            }, 2000); // 2 second delay to let user see the completion
           }
         }
         
@@ -166,12 +184,8 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
           frameIndexRef.current = boundedFrameIndex;
         }
         
-        // Provide voice feedback only on rep completion and state changes
-        if (voiceFeedback && (
-          result.debugInfo.stateChange || // State changes
-          result.repCount > currentRep // Rep completion
-        )) {
-          console.log('🎤 Calling voice feedback - State change:', result.debugInfo.stateChange, 'Rep count:', result.repCount);
+        // Provide voice feedback
+        if (voiceFeedback) {
           voiceFeedback.provideFeedback(result, currentFormAnalysis, result.repCount, score);
         }
       } catch (error) {
@@ -231,13 +245,17 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
             console.log(`Rep ${newRepCount} completed! Quality: ${repDetection.repQuality}, Bonus: +${bonusPoints} points`);
             if (newRepCount === 10) {
               console.log('🎉 Exercise session complete! 10 reps reached!');
+              // Auto-complete the session after a short delay
+              setTimeout(() => {
+                handleComplete();
+              }, 2000); // 2 second delay to let user see the completion
             }
           }
           
           frameIndexRef.current = boundedFrameIndex;
           
-          // Provide voice feedback for legacy system only on rep completion
-          if (voiceFeedback && repDetection.isRepComplete) {
+          // Provide voice feedback for legacy system
+          if (voiceFeedback) {
             voiceFeedback.provideFeedback(null, analysis, currentRep, score);
           }
         } catch (error) {
@@ -407,16 +425,7 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
             >
               {voiceFeedbackEnabled ? 'Voice On' : 'Voice Off'}
             </button>
-            <button 
-              onClick={() => setUseSimpleFormAnalysis(!useSimpleFormAnalysis)}
-              className={`text-sm px-2 py-1 rounded ${
-                useSimpleFormAnalysis 
-                  ? 'bg-orange-500 text-white' 
-                  : 'bg-gray-500 text-white'
-              }`}
-            >
-              {useSimpleFormAnalysis ? 'Simple Form' : 'Complex Form'}
-            </button>
+
           </div>
         </div>
         
@@ -767,39 +776,7 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
               </div>
             </div>
 
-            {/* Simple Form Analysis Display */}
-            {useSimpleFormAnalysis && simpleFormResult && (
-              <div className="card">
-                <h3 className="text-lg font-semibold mb-3">Simple Form Analysis</h3>
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm">Arm Position</span>
-                    <span className={`text-xs font-bold px-2 py-1 rounded ${
-                      simpleFormResult.armPosition === 'up' ? 'bg-green-100 text-green-800' :
-                      simpleFormResult.armPosition === 'raising' ? 'bg-blue-100 text-blue-800' :
-                      'bg-gray-100 text-gray-800'
-                    }`}>
-                      {simpleFormResult.armPosition.toUpperCase()}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm">Arm Height</span>
-                    <span className="font-bold">{Math.round(simpleFormResult.armHeight)}%</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm">Form Status</span>
-                    <span className={`text-xs font-bold px-2 py-1 rounded ${
-                      simpleFormResult.isInGoodPosition ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                    }`}>
-                      {simpleFormResult.isInGoodPosition ? 'GOOD' : 'NEEDS WORK'}
-                    </span>
-                  </div>
-                  <div className="p-2 bg-gray-50 rounded text-sm text-gray-700">
-                    {simpleFormResult.feedback}
-                  </div>
-                </div>
-              </div>
-            )}
+
             
             {/* Sky Painter Game */}
             <div className="card">

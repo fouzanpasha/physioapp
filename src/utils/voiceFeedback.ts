@@ -11,7 +11,7 @@ export class VoiceFeedbackSystem {
   private currentUtterance: SpeechSynthesisUtterance | null = null;
   private config: VoiceFeedbackConfig;
   private lastFeedbackTime: number = 0;
-  private feedbackCooldown: number = 3000; // 3 seconds between feedback
+  private feedbackCooldown: number = 5000; // 5 seconds between feedback to reduce spam
   private repCount: number = 0;
   private lastRepCount: number = 0;
 
@@ -77,8 +77,7 @@ export class VoiceFeedbackSystem {
 
     let feedbackMessage = '';
 
-    // ONLY provide feedback for rep completion and state changes
-    // Disable form correction spam for now
+    // Check for rep completion first (highest priority)
     if (currentRep > this.lastRepCount) {
       feedbackMessage = this.getRepCompletionFeedback(currentRep, stateMachineResult);
       this.lastRepCount = currentRep;
@@ -89,6 +88,17 @@ export class VoiceFeedbackSystem {
              !stateMachineResult.debugInfo.stateChange.includes('REP COMPLETE')) {
       feedbackMessage = this.getStateChangeFeedback(stateMachineResult);
       console.log('Voice: State change feedback');
+    }
+    // Check for form issues (only if accuracy is very low and we have form data)
+    else if (formAnalysis && formAnalysis.accuracy !== undefined && formAnalysis.accuracy < 30) {
+      feedbackMessage = this.getFormCorrectionFeedback(formAnalysis);
+      console.log('Voice: Form correction feedback');
+    }
+    // Provide encouragement for good form (only occasionally and with higher threshold)
+    else if (formAnalysis && formAnalysis.accuracy !== undefined && formAnalysis.accuracy > 90 && 
+             Math.random() < 0.2) { // 20% chance to avoid spam
+      feedbackMessage = this.getEncouragementFeedback(formAnalysis);
+      console.log('Voice: Encouragement feedback');
     }
 
     if (feedbackMessage) {
@@ -133,14 +143,14 @@ export class VoiceFeedbackSystem {
     const accuracy = formAnalysis.accuracy;
     const feedback = formAnalysis.feedback || '';
     
-    if (accuracy < 30) {
-      return 'Your form needs work. Slow down and focus on the movement pattern.';
+    if (accuracy < 20) {
+      return 'Your form needs work. Stand with arms at your sides, then raise them smoothly to shoulder level.';
     }
-    else if (accuracy < 50) {
-      return 'Try to match the template movement more closely.';
+    else if (accuracy < 30) {
+      return 'Focus on raising your arms straight out to the sides, keeping them at shoulder level.';
     }
     
-    return feedback;
+    return feedback || 'Try to match the movement pattern more closely.';
   }
 
   private getEncouragementFeedback(formAnalysis: any): string {

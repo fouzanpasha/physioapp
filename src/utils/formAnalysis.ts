@@ -352,8 +352,9 @@ function calculateSimpleAccuracy(currentLandmarks: any[], templateLandmarks: any
   const shoulderDistance = calculate3DDistance(currentShoulder, templateShoulder);
 
   // Convert distances to accuracy (closer = higher accuracy)
-  const wristAccuracy = Math.max(0, 100 - (wristDistance * 200)); // More forgiving
-  const shoulderAccuracy = Math.max(0, 100 - (shoulderDistance * 200));
+  // More forgiving thresholds - real-world movement has natural variation
+  const wristAccuracy = Math.max(0, 100 - (wristDistance * 100)); // Much more forgiving
+  const shoulderAccuracy = Math.max(0, 100 - (shoulderDistance * 100));
 
   // Weight wrist more heavily since it's more important for the exercise
   const accuracy = (wristAccuracy * 0.7) + (shoulderAccuracy * 0.3);
