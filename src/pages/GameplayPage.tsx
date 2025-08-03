@@ -32,8 +32,7 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
   const [debugMode, setDebugMode] = useState(false);
   const [useStateMachine, setUseStateMachine] = useState(true); // Toggle between state machine and old system
   const [voiceFeedbackEnabled, setVoiceFeedbackEnabled] = useState(true);
-  const [showTemplatePreview, setShowTemplatePreview] = useState(true);
-  const [templatePreviewStep, setTemplatePreviewStep] = useState(0);
+
 
   
   // State machine for rep tracking
@@ -93,8 +92,10 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
         });
         setVoiceFeedback(newVoiceFeedback);
         
-        // Start template preview animation
-        startTemplatePreview(exerciseTemplate);
+        // Provide exercise instructions after a short delay
+        setTimeout(() => {
+          newVoiceFeedback.provideExerciseInstructions(exercise.name);
+        }, 1000);
       } else {
         console.warn('No template found for exercise:', exercise.name);
       }
@@ -103,34 +104,7 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
     loadTemplate();
   }, [exercise.name, voiceFeedbackEnabled]);
 
-  // Template preview animation
-  const startTemplatePreview = (exerciseTemplate: any) => {
-    if (!exerciseTemplate.frames || exerciseTemplate.frames.length === 0) {
-      setShowTemplatePreview(false);
-      return;
-    }
 
-    const totalFrames = exerciseTemplate.frames.length;
-    let currentFrame = 0;
-
-    const animateTemplate = () => {
-      if (currentFrame < totalFrames) {
-        setTemplatePreviewStep(currentFrame);
-        currentFrame++;
-        setTimeout(animateTemplate, 200); // 200ms per frame
-      } else {
-        // Animation complete, hide preview and start exercise
-        setTimeout(() => {
-          setShowTemplatePreview(false);
-          if (voiceFeedback) {
-            voiceFeedback.provideExerciseInstructions(exercise.name);
-          }
-        }, 1000);
-      }
-    };
-
-    animateTemplate();
-  };
 
   // Update score based on current form analysis
   const updateScore = useCallback((analysis: FormAnalysisResult) => {
@@ -466,25 +440,7 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
           {/* Video Feed with Pose Detection */}
           <div className="lg:col-span-2">
             <div className="card">
-              {/* Template Preview Overlay */}
-              {showTemplatePreview && template && (
-                <div className="absolute inset-0 bg-black bg-opacity-75 flex items-center justify-center z-30 rounded-lg">
-                  <div className="text-center text-white">
-                    <h3 className="text-2xl font-bold mb-4">Watch the Template</h3>
-                    <div className="bg-white bg-opacity-10 rounded-lg p-6 mb-4">
-                      <div className="text-4xl mb-2">👤</div>
-                      <p className="text-lg">Frame {templatePreviewStep + 1} of {template.frameCount}</p>
-                      <div className="w-full bg-gray-600 rounded-full h-2 mt-2">
-                        <div 
-                          className="bg-blue-500 h-2 rounded-full transition-all duration-200"
-                          style={{ width: `${((templatePreviewStep + 1) / template.frameCount) * 100}%` }}
-                        ></div>
-                      </div>
-                    </div>
-                    <p className="text-sm opacity-75">This shows the perfect form to follow</p>
-                  </div>
-                </div>
-              )}
+
               <div className="mb-4">
                 {isRecordingMode ? (
                   <div className="relative">

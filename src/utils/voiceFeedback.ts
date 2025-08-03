@@ -163,68 +163,12 @@ export class VoiceFeedbackSystem {
     sessionDuration: number;
   }) {
     if (!this.config.enabled) return;
-
-    const { totalReps, averageAccuracy, totalScore, sessionDuration } = sessionStats;
-    const sessionTime = Date.now() - this.sessionStartTime;
-    
-    let message = '';
-    
-    if (totalReps >= 10) {
-      message = 'Congratulations! You\'ve completed all 10 reps. ';
-      
-      if (averageAccuracy > 90) {
-        message += 'Your form was excellent throughout the session. ';
-      } else if (averageAccuracy > 75) {
-        message += 'You showed good form and consistency. ';
-      } else {
-        message += 'You completed the exercise with room for improvement. ';
-      }
-    } else {
-      message = `You completed ${totalReps} reps. `;
-      
-      if (averageAccuracy > 80) {
-        message += 'Your form was very good. ';
-      } else if (averageAccuracy > 60) {
-        message += 'You showed decent form. ';
-      } else {
-        message += 'Focus on form for better results. ';
-      }
-    }
-    
-    message += `Your total score is ${totalScore} points. `;
-    
-    const minutes = Math.floor(sessionDuration / 60000);
-    const seconds = Math.floor((sessionDuration % 60000) / 1000);
-    message += `Session time: ${minutes} minutes and ${seconds} seconds. `;
-    
-    if (totalReps >= 10) {
-      message += 'Great job completing the full session!';
-    } else {
-      message += 'Keep practicing to improve your form and complete more reps.';
-    }
-    
-    this.speak(message);
+    // Keep it simple - no verbose session feedback
   }
 
   public provideExerciseInstructions(exerciseName: string) {
     if (!this.config.enabled) return;
-
-    let instructions = '';
-    
-    switch (exerciseName.toLowerCase()) {
-      case 'shoulder abduction':
-      case 'sky painter':
-        instructions = `Welcome to ${exerciseName}! I'll be your guide through this exercise. 
-          Stand with your arms relaxed at your sides. 
-          When you're ready, raise both arms smoothly out to the sides, keeping them straight, until they reach shoulder level. 
-          Hold briefly, then slowly lower them back to the starting position. 
-          Complete 10 reps with good form. I'll give you feedback along the way. Let's begin!`;
-        break;
-      default:
-        instructions = `Welcome to ${exerciseName}! Follow the on-screen guidance and complete 10 reps with good form. I'll provide feedback to help you improve. Let's begin!`;
-    }
-    
-    this.speak(instructions);
+    // Keep it simple - no verbose instructions
   }
 
   public provideCountdown(count: number) {
