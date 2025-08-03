@@ -29,6 +29,7 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
   const [recordingStep, setRecordingStep] = useState<'instructions' | 'recording' | 'saving'>('instructions');
   const [countdown, setCountdown] = useState(3);
   const [debugMode, setDebugMode] = useState(false);
+  const [useStateMachine, setUseStateMachine] = useState(true); // Toggle between state machine and old system
   
   // State machine for rep tracking
   const [stateMachine, setStateMachine] = useState<RepetitionStateMachine | null>(null);
@@ -71,8 +72,8 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
       recordFrame(poseLandmarks);
     }
 
-    // Use state machine for rep detection and form analysis
-    if (stateMachine) {
+    if (useStateMachine && stateMachine) {
+      // Use state machine for rep detection and form analysis
       try {
         const result = stateMachine.processPose(poseLandmarks);
         setStateMachineResult(result);
@@ -114,8 +115,54 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
       } catch (error) {
         console.error('Error in state machine analysis:', error);
       }
+    } else {
+      // Use legacy system
+      if (template && template.frames && template.frames.length > 0) {
+        try {
+          const currentTime = Date.now() - sessionStartTime;
+          const templateDuration = template.duration;
+          const frameIndex = Math.floor((currentTime / templateDuration) * template.frames.length);
+          const boundedFrameIndex = Math.min(frameIndex, template.frames.length - 1);
+          
+          const analysis = analyzeForm(poseLandmarks, template, boundedFrameIndex);
+          setCurrentFormAnalysis(analysis);
+          updateScore(analysis);
+          
+          // Update active arm
+          if (analysis.activeArm) {
+            setActiveArm(analysis.activeArm);
+          }
+          
+          // Check for repetition completion using legacy system
+          const repDetection = detectRepetition(poseLandmarks, analysis, null);
+          
+          if (repDetection.isRepComplete && currentRep < 10) {
+            const newRepCount = Math.min(currentRep + 1, 10);
+            setCurrentRep(newRepCount);
+            setRepQuality(repDetection.repQuality);
+            setLastRepTime(Date.now());
+            
+            let bonusPoints = 0;
+            switch (repDetection.repQuality) {
+              case 'excellent': bonusPoints = 15; break;
+              case 'good': bonusPoints = 10; break;
+              case 'poor': bonusPoints = 5; break;
+            }
+            setScore(prev => prev + bonusPoints);
+            
+            console.log(`Rep ${newRepCount} completed! Quality: ${repDetection.repQuality}, Bonus: +${bonusPoints} points`);
+            if (newRepCount === 10) {
+              console.log('🎉 Exercise session complete! 10 reps reached!');
+            }
+          }
+          
+          frameIndexRef.current = boundedFrameIndex;
+        } catch (error) {
+          console.error('Error in legacy form analysis:', error);
+        }
+      }
     }
-  }, [stateMachine, template, recordingState.isRecording, recordFrame, sessionStartTime]);
+  }, [useStateMachine, stateMachine, template, updateScore, recordingState.isRecording, recordFrame, sessionStartTime, currentRep]);
 
   // Start form analysis when MediaPipe is ready
   useEffect(() => {
@@ -239,6 +286,16 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
               className="text-sm bg-gray-500 text-white px-2 py-1 rounded"
             >
               {debugMode ? 'Hide Debug' : 'Debug'}
+            </button>
+            <button 
+              onClick={() => setUseStateMachine(!useStateMachine)}
+              className={`text-sm px-2 py-1 rounded ${
+                useStateMachine 
+                  ? 'bg-blue-500 text-white' 
+                  : 'bg-green-500 text-white'
+              }`}
+            >
+              {useStateMachine ? 'State Machine' : 'Legacy System'}
             </button>
           </div>
         </div>

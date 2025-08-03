@@ -32,13 +32,21 @@ export interface ExerciseTemplate {
 export class RepetitionStateMachine {
   private repCount: number = 0;
   private repState: 'waiting_for_start' | 'movement_in_progress' | 'movement_at_end' = 'waiting_for_start';
-  private proximityThreshold: number = 0.25; // More lenient threshold for testing
+  private proximityThreshold: number = 0.15; // Back to more conservative threshold
   private startPoint: any = null;
   private endPoint: any = null;
   private lastStateChange: string | null = null;
+  
+  // Add state stability tracking to prevent rapid changes
+  private stateStartTime: number = 0;
+  private stateStabilityThreshold: number = 500; // Must stay in state for 500ms
+  private lastStateTransitionTime: number = 0;
+  private minTimeBetweenTransitions: number = 1000; // Minimum 1 second between transitions
 
   constructor(template: ExerciseTemplate) {
     this.initializeTemplatePoints(template);
+    this.stateStartTime = Date.now();
+    this.lastStateTransitionTime = Date.now();
   }
 
   /**
@@ -228,23 +236,42 @@ export class RepetitionStateMachine {
    * Process the state machine logic
    */
   private processStateMachine(distanceToStart: number, distanceToEnd: number) {
+    const currentTime = Date.now();
     const previousState = this.repState;
     this.lastStateChange = null;
+
+    // Check if enough time has passed since last transition
+    const timeSinceLastTransition = currentTime - this.lastStateTransitionTime;
+    if (timeSinceLastTransition < this.minTimeBetweenTransitions) {
+      console.log('State change blocked - too soon since last transition:', timeSinceLastTransition + 'ms');
+      return;
+    }
+
+    // Check if we've been in current state long enough
+    const timeInCurrentState = currentTime - this.stateStartTime;
+    if (timeInCurrentState < this.stateStabilityThreshold) {
+      console.log('State change blocked - not stable enough:', timeInCurrentState + 'ms');
+      return;
+    }
 
     console.log('Processing State Machine:', {
       currentState: this.repState,
       distanceToStart: distanceToStart.toFixed(3),
       distanceToEnd: distanceToEnd.toFixed(3),
       threshold: this.proximityThreshold,
-      repCount: this.repCount
+      repCount: this.repCount,
+      timeInCurrentState: timeInCurrentState + 'ms',
+      timeSinceLastTransition: timeSinceLastTransition + 'ms'
     });
+
+    let shouldTransition = false;
+    let newState: typeof this.repState = this.repState;
 
     switch (this.repState) {
       case 'waiting_for_start':
         if (distanceToStart < this.proximityThreshold) {
-          this.repState = 'movement_in_progress';
-          this.lastStateChange = 'Start position reached. Movement beginning.';
-          console.log('STATE CHANGE:', this.lastStateChange);
+          newState = 'movement_in_progress';
+          shouldTransition = true;
         } else {
           console.log('Waiting for start - distance too far:', distanceToStart.toFixed(3));
         }
@@ -252,9 +279,8 @@ export class RepetitionStateMachine {
 
       case 'movement_in_progress':
         if (distanceToEnd < this.proximityThreshold) {
-          this.repState = 'movement_at_end';
-          this.lastStateChange = 'End position reached.';
-          console.log('STATE CHANGE:', this.lastStateChange);
+          newState = 'movement_at_end';
+          shouldTransition = true;
         } else {
           console.log('Movement in progress - not at end yet:', distanceToEnd.toFixed(3));
         }
@@ -262,14 +288,32 @@ export class RepetitionStateMachine {
 
       case 'movement_at_end':
         if (distanceToStart < this.proximityThreshold) {
+          newState = 'waiting_for_start';
+          shouldTransition = true;
           this.repCount++;
-          this.repState = 'waiting_for_start';
-          this.lastStateChange = `REP COMPLETE! Total reps: ${this.repCount}`;
-          console.log('STATE CHANGE:', this.lastStateChange);
         } else {
           console.log('At end position - waiting to return to start:', distanceToStart.toFixed(3));
         }
         break;
+    }
+
+    // Only transition if conditions are met
+    if (shouldTransition && newState !== this.repState) {
+      const oldState = this.repState;
+      this.repState = newState;
+      this.stateStartTime = currentTime;
+      this.lastStateTransitionTime = currentTime;
+
+      // Set appropriate state change message
+      if (oldState === 'waiting_for_start' && newState === 'movement_in_progress') {
+        this.lastStateChange = 'Start position reached. Movement beginning.';
+      } else if (oldState === 'movement_in_progress' && newState === 'movement_at_end') {
+        this.lastStateChange = 'End position reached.';
+      } else if (oldState === 'movement_at_end' && newState === 'waiting_for_start') {
+        this.lastStateChange = `REP COMPLETE! Total reps: ${this.repCount}`;
+      }
+
+      console.log('STATE CHANGE:', this.lastStateChange);
     }
   }
 
