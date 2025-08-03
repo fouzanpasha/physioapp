@@ -32,16 +32,16 @@ export interface ExerciseTemplate {
 export class RepetitionStateMachine {
   private repCount: number = 0;
   private repState: 'waiting_for_start' | 'movement_in_progress' | 'movement_at_end' = 'waiting_for_start';
-  private proximityThreshold: number = 0.15; // Back to more conservative threshold
+  private proximityThreshold: number = 0.20; // More lenient threshold for better detection
   private startPoint: any = null;
   private endPoint: any = null;
   private lastStateChange: string | null = null;
   
   // Add state stability tracking to prevent rapid changes
   private stateStartTime: number = 0;
-  private stateStabilityThreshold: number = 500; // Must stay in state for 500ms
+  private stateStabilityThreshold: number = 300; // Reduced to 300ms for more responsive detection
   private lastStateTransitionTime: number = 0;
-  private minTimeBetweenTransitions: number = 1000; // Minimum 1 second between transitions
+  private minTimeBetweenTransitions: number = 800; // Reduced to 800ms for faster rep counting
 
   constructor(template: ExerciseTemplate) {
     this.initializeTemplatePoints(template);
@@ -247,10 +247,11 @@ export class RepetitionStateMachine {
       return;
     }
 
-    // Check if we've been in current state long enough
+    // Check if we've been in current state long enough (but be more lenient for movement_in_progress)
     const timeInCurrentState = currentTime - this.stateStartTime;
-    if (timeInCurrentState < this.stateStabilityThreshold) {
-      console.log('State change blocked - not stable enough:', timeInCurrentState + 'ms');
+    const requiredStability = this.repState === 'movement_in_progress' ? 200 : this.stateStabilityThreshold;
+    if (timeInCurrentState < requiredStability) {
+      console.log('State change blocked - not stable enough:', timeInCurrentState + 'ms', 'required:', requiredStability + 'ms');
       return;
     }
 
@@ -278,7 +279,9 @@ export class RepetitionStateMachine {
         break;
 
       case 'movement_in_progress':
-        if (distanceToEnd < this.proximityThreshold) {
+        // More lenient check for end position - allow transition if we're getting closer to end
+        if (distanceToEnd < this.proximityThreshold || 
+            (distanceToEnd < this.proximityThreshold * 1.5 && distanceToEnd < distanceToStart)) {
           newState = 'movement_at_end';
           shouldTransition = true;
         } else {
@@ -287,7 +290,9 @@ export class RepetitionStateMachine {
         break;
 
       case 'movement_at_end':
-        if (distanceToStart < this.proximityThreshold) {
+        // More lenient check for return to start - allow transition if we're getting closer to start
+        if (distanceToStart < this.proximityThreshold || 
+            (distanceToStart < this.proximityThreshold * 1.5 && distanceToStart < distanceToEnd)) {
           newState = 'waiting_for_start';
           shouldTransition = true;
           this.repCount++;
