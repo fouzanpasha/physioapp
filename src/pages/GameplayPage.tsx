@@ -564,13 +564,6 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
                 </div>
               </div>
             )}
-                </div>
-              ) : (
-                <div className="text-sm text-gray-500">
-                  {template ? 'Perform the exercise to see form analysis' : 'No template available. Record one first.'}
-                </div>
-              )}
-            </div>
             
             {/* Rep Quality Indicator */}
             <div className="card">
@@ -596,7 +589,7 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
                 )}
               </div>
             </div>
-
+            
             {/* Sky Painter Game */}
             <div className="card">
               <h3 className="text-lg font-semibold mb-3">Sky Painter</h3>

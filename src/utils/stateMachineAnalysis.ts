@@ -32,7 +32,7 @@ export interface ExerciseTemplate {
 export class RepetitionStateMachine {
   private repCount: number = 0;
   private repState: 'waiting_for_start' | 'movement_in_progress' | 'movement_at_end' = 'waiting_for_start';
-  private proximityThreshold: number = 0.15; // Adjustable threshold
+  private proximityThreshold: number = 0.25; // More lenient threshold for testing
   private startPoint: any = null;
   private endPoint: any = null;
   private lastStateChange: string | null = null;
@@ -87,13 +87,27 @@ export class RepetitionStateMachine {
   private extractWristPosition(frame: any[]): any {
     if (!frame || frame.length < 6) return null;
 
-    // Try right wrist first (index 4), then left wrist (index 5)
-    const rightWrist = frame[4];
-    const leftWrist = frame[5];
+    // Template frames might have different structure than live pose landmarks
+    // Try different possible indices for wrist positions
+    const possibleRightWrists = [frame[4], frame[15]]; // Try both possible indices
+    const possibleLeftWrists = [frame[5], frame[16]]; // Try both possible indices
 
-    if (rightWrist) return rightWrist;
-    if (leftWrist) return leftWrist;
+    // Find the first valid wrist position
+    for (const wrist of possibleRightWrists) {
+      if (wrist && typeof wrist.x === 'number' && typeof wrist.y === 'number') {
+        console.log('Found right wrist in template:', { x: wrist.x.toFixed(3), y: wrist.y.toFixed(3) });
+        return wrist;
+      }
+    }
 
+    for (const wrist of possibleLeftWrists) {
+      if (wrist && typeof wrist.x === 'number' && typeof wrist.y === 'number') {
+        console.log('Found left wrist in template:', { x: wrist.x.toFixed(3), y: wrist.y.toFixed(3) });
+        return wrist;
+      }
+    }
+
+    console.warn('No valid wrist position found in template frame');
     return null;
   }
 
@@ -106,6 +120,10 @@ export class RepetitionStateMachine {
     }
 
     if (!this.startPoint || !this.endPoint) {
+      console.warn('State Machine: Template not properly initialized', {
+        startPoint: this.startPoint,
+        endPoint: this.endPoint
+      });
       return this.createDefaultResult('Template not properly initialized');
     }
 
@@ -119,6 +137,18 @@ export class RepetitionStateMachine {
     // Calculate distances to key points
     const distanceToStart = this.calculate3DDistance(currentWrist, this.startPoint);
     const distanceToEnd = this.calculate3DDistance(currentWrist, this.endPoint);
+
+    // Debug logging
+    console.log('State Machine Debug:', {
+      currentWrist: { x: currentWrist.x.toFixed(3), y: currentWrist.y.toFixed(3) },
+      startPoint: { x: this.startPoint.x.toFixed(3), y: this.startPoint.y.toFixed(3) },
+      endPoint: { x: this.endPoint.x.toFixed(3), y: this.endPoint.y.toFixed(3) },
+      distanceToStart: distanceToStart.toFixed(3),
+      distanceToEnd: distanceToEnd.toFixed(3),
+      proximityThreshold: this.proximityThreshold,
+      currentState: this.repState,
+      activeArm
+    });
 
     // Process state machine
     const previousState = this.repState;
@@ -153,10 +183,18 @@ export class RepetitionStateMachine {
    * Determine which arm is active and get its wrist position
    */
   private determineActiveArm(poseLandmarks: any[]): { activeArm: 'left' | 'right' | 'both', currentWrist: any } {
+    // MediaPipe Pose landmarks: 15=right wrist, 16=left wrist, 11=right shoulder, 12=left shoulder
     const rightWrist = poseLandmarks[15]; // Right wrist
     const rightShoulder = poseLandmarks[11]; // Right shoulder
     const leftWrist = poseLandmarks[16]; // Left wrist
     const leftShoulder = poseLandmarks[12]; // Left shoulder
+
+    console.log('Pose Landmarks Debug:', {
+      rightWrist: rightWrist ? { x: rightWrist.x.toFixed(3), y: rightWrist.y.toFixed(3) } : null,
+      leftWrist: leftWrist ? { x: leftWrist.x.toFixed(3), y: leftWrist.y.toFixed(3) } : null,
+      rightShoulder: rightShoulder ? { x: rightShoulder.x.toFixed(3), y: rightShoulder.y.toFixed(3) } : null,
+      leftShoulder: leftShoulder ? { x: leftShoulder.x.toFixed(3), y: leftShoulder.y.toFixed(3) } : null
+    });
 
     let activeArm: 'left' | 'right' | 'both' = 'right';
     let currentWrist = rightWrist;
@@ -193,12 +231,22 @@ export class RepetitionStateMachine {
     const previousState = this.repState;
     this.lastStateChange = null;
 
+    console.log('Processing State Machine:', {
+      currentState: this.repState,
+      distanceToStart: distanceToStart.toFixed(3),
+      distanceToEnd: distanceToEnd.toFixed(3),
+      threshold: this.proximityThreshold,
+      repCount: this.repCount
+    });
+
     switch (this.repState) {
       case 'waiting_for_start':
         if (distanceToStart < this.proximityThreshold) {
           this.repState = 'movement_in_progress';
           this.lastStateChange = 'Start position reached. Movement beginning.';
           console.log('STATE CHANGE:', this.lastStateChange);
+        } else {
+          console.log('Waiting for start - distance too far:', distanceToStart.toFixed(3));
         }
         break;
 
@@ -207,6 +255,8 @@ export class RepetitionStateMachine {
           this.repState = 'movement_at_end';
           this.lastStateChange = 'End position reached.';
           console.log('STATE CHANGE:', this.lastStateChange);
+        } else {
+          console.log('Movement in progress - not at end yet:', distanceToEnd.toFixed(3));
         }
         break;
 
@@ -216,6 +266,8 @@ export class RepetitionStateMachine {
           this.repState = 'waiting_for_start';
           this.lastStateChange = `REP COMPLETE! Total reps: ${this.repCount}`;
           console.log('STATE CHANGE:', this.lastStateChange);
+        } else {
+          console.log('At end position - waiting to return to start:', distanceToStart.toFixed(3));
         }
         break;
     }
