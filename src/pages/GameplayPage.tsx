@@ -2,6 +2,7 @@ import { ExerciseTemplate, GameSession } from '../types';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { KinetiPlayCanvas } from '../components/KinetiPlayCanvas';
 import { analyzeForm, FormAnalysisResult, ExerciseTemplate as FormTemplate, detectRepetition } from '../utils/formAnalysis';
+import { RepetitionStateMachine, StateMachineResult } from '../utils/stateMachineAnalysis';
 import { useExerciseRecording } from '../hooks/useExerciseRecording';
 
 // TypeScript declaration for global MediaPipe
@@ -29,38 +30,32 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
   const [countdown, setCountdown] = useState(3);
   const [debugMode, setDebugMode] = useState(false);
   
-  // New state for rep tracking
+  // State machine for rep tracking
+  const [stateMachine, setStateMachine] = useState<RepetitionStateMachine | null>(null);
+  const [stateMachineResult, setStateMachineResult] = useState<StateMachineResult | null>(null);
   const [repQuality, setRepQuality] = useState<'poor' | 'good' | 'excellent'>('poor');
   const [activeArm, setActiveArm] = useState<'left' | 'right' | 'both'>('right');
-  const [previousPhase, setPreviousPhase] = useState<string | null>(null);
   const [lastRepTime, setLastRepTime] = useState<number>(0);
   
   const frameIndexRef = useRef(0);
   const analysisIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const currentRepRef = useRef(0);
-  const previousPhaseRef = useRef<string | null>(null);
   
   // Recording hook
   const { recordingState, startRecording, stopRecording, recordFrame, saveTemplate } = useExerciseRecording();
 
-  // Load template on component mount
+  // Load template and initialize state machine on component mount
   useEffect(() => {
     const templates = JSON.parse(localStorage.getItem('exerciseTemplates') || '{}');
     const exerciseTemplate = templates[exercise.name];
     if (exerciseTemplate) {
       setTemplate(exerciseTemplate);
+      
+      // Initialize state machine with template
+      const newStateMachine = new RepetitionStateMachine(exerciseTemplate);
+      setStateMachine(newStateMachine);
+      console.log('State Machine initialized for exercise:', exercise.name);
     }
   }, [exercise.name]);
-
-  // Update ref when currentRep changes
-  useEffect(() => {
-    currentRepRef.current = currentRep;
-  }, [currentRep]);
-
-  // Update ref when previousPhase changes
-  useEffect(() => {
-    previousPhaseRef.current = previousPhase;
-  }, [previousPhase]);
 
   // Update score based on current form analysis
   const updateScore = useCallback((analysis: FormAnalysisResult) => {
@@ -76,70 +71,51 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
       recordFrame(poseLandmarks);
     }
 
-    // Analyze form if template exists
-    if (template && template.frames && template.frames.length > 0) {
+    // Use state machine for rep detection and form analysis
+    if (stateMachine) {
       try {
-        // Use a more sophisticated frame matching strategy
-        const currentTime = Date.now() - sessionStartTime;
-        const templateDuration = template.duration;
-        const frameIndex = Math.floor((currentTime / templateDuration) * template.frames.length);
-        const boundedFrameIndex = Math.min(frameIndex, template.frames.length - 1);
+        const result = stateMachine.processPose(poseLandmarks);
+        setStateMachineResult(result);
         
-        const analysis = analyzeForm(poseLandmarks, template, boundedFrameIndex);
-        setCurrentFormAnalysis(analysis);
-        updateScore(analysis);
+        // Update rep count from state machine
+        setCurrentRep(result.repCount);
         
-        // Update active arm
-        if (analysis.activeArm) {
-          setActiveArm(analysis.activeArm);
+        // Update other state variables
+        setRepQuality(result.repQuality);
+        setActiveArm(result.activeArm);
+        
+        // Add points from state machine
+        if (result.points > 0) {
+          setScore(prev => prev + result.points);
         }
         
-        // Check for repetition completion
-        const repDetection = detectRepetition(poseLandmarks, analysis, previousPhaseRef.current);
-        
-        if (repDetection.isRepComplete && currentRepRef.current < 10) {
-          // Increment rep counter (capped at 10)
-          const newRepCount = Math.min(currentRepRef.current + 1, 10);
-          currentRepRef.current = newRepCount;
-          setCurrentRep(newRepCount);
-          setRepQuality(repDetection.repQuality);
+        // Check if rep was just completed
+        if (result.debugInfo.stateChange && result.debugInfo.stateChange.includes('REP COMPLETE')) {
           setLastRepTime(Date.now());
+          console.log(`🎉 Rep ${result.repCount} completed! Quality: ${result.repQuality}`);
           
-          // Add bonus points based on rep quality
-          let bonusPoints = 0;
-          switch (repDetection.repQuality) {
-            case 'excellent':
-              bonusPoints = 15;
-              break;
-            case 'good':
-              bonusPoints = 10;
-              break;
-            case 'poor':
-              bonusPoints = 5;
-              break;
-          }
-          setScore(prev => prev + bonusPoints);
-          
-          console.log(`Rep ${newRepCount} completed! Quality: ${repDetection.repQuality}, Bonus: +${bonusPoints} points`);
-          
-          // If we've reached 10 reps, show completion message
-          if (newRepCount === 10) {
+          if (result.repCount >= 10) {
             console.log('🎉 Exercise session complete! 10 reps reached!');
           }
         }
         
-        // Update previous phase for next analysis
-        previousPhaseRef.current = analysis.phase || null;
-        setPreviousPhase(analysis.phase || null);
-        
-        // Update frame index for next analysis
-        frameIndexRef.current = boundedFrameIndex;
+        // Also run legacy form analysis for compatibility
+        if (template && template.frames && template.frames.length > 0) {
+          const currentTime = Date.now() - sessionStartTime;
+          const templateDuration = template.duration;
+          const frameIndex = Math.floor((currentTime / templateDuration) * template.frames.length);
+          const boundedFrameIndex = Math.min(frameIndex, template.frames.length - 1);
+          
+          const analysis = analyzeForm(poseLandmarks, template, boundedFrameIndex);
+          setCurrentFormAnalysis(analysis);
+          
+          frameIndexRef.current = boundedFrameIndex;
+        }
       } catch (error) {
-        console.error('Error analyzing form:', error);
-        // Don't crash the app, just skip analysis
+        console.error('Error in state machine analysis:', error);
       }
     }
-  }, [template, updateScore, recordingState.isRecording, recordFrame, sessionStartTime]);
+  }, [stateMachine, template, recordingState.isRecording, recordFrame, sessionStartTime]);
 
   // Start form analysis when MediaPipe is ready
   useEffect(() => {
@@ -247,6 +223,11 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
             <div>Reps: <span className="font-bold">{currentRep}/10</span></div>
             <div>Time: <span className="font-bold">{getElapsedTime()}</span></div>
             <div className="text-sm">
+              <div>State: <span className={`font-bold ${
+                stateMachineResult?.repState === 'waiting_for_start' ? 'text-blue-600' :
+                stateMachineResult?.repState === 'movement_in_progress' ? 'text-orange-600' :
+                stateMachineResult?.repState === 'movement_at_end' ? 'text-green-600' : 'text-gray-600'
+              }`}>{stateMachineResult?.repState?.replace(/_/g, ' ') || 'unknown'}</span></div>
               <div>Active Arm: <span className="font-bold capitalize">{activeArm}</span></div>
               <div>Last Rep: <span className={`font-bold ${
                 repQuality === 'excellent' ? 'text-green-600' : 
@@ -505,7 +486,6 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
                       <div className="text-xs">
                         <div>Current Rep: {currentRep}</div>
                         <div>Last Rep Quality: {repQuality}</div>
-                        <div>Previous Phase: {previousPhase || 'none'}</div>
                         <div>Last Rep Time: {lastRepTime > 0 ? new Date(lastRepTime).toLocaleTimeString() : 'none'}</div>
                       </div>
                       <div className="mt-2 font-semibold">Template Sample:</div>
@@ -517,6 +497,73 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
                       )}
                     </div>
                   )}
+                </div>
+              ) : (
+                <div className="text-sm text-gray-500">
+                  {template ? 'Perform the exercise to see form analysis' : 'No template available. Record one first.'}
+                </div>
+              )}
+            </div>
+            
+            {/* State Machine Analysis */}
+            {stateMachineResult && (
+              <div className="card">
+                <h3 className="text-lg font-semibold mb-3">State Machine Analysis</h3>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Current State</span>
+                    <span className={`text-xs font-bold px-2 py-1 rounded ${
+                      stateMachineResult.repState === 'waiting_for_start' ? 'bg-blue-100 text-blue-800' :
+                      stateMachineResult.repState === 'movement_in_progress' ? 'bg-orange-100 text-orange-800' :
+                      stateMachineResult.repState === 'movement_at_end' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                    }`}>
+                      {stateMachineResult.repState.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Rep Count</span>
+                    <span className="font-bold text-lg">{stateMachineResult.repCount}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Accuracy</span>
+                    <span className={`font-bold ${
+                      stateMachineResult.accuracy >= 90 ? 'text-green-600' :
+                      stateMachineResult.accuracy >= 75 ? 'text-blue-600' :
+                      stateMachineResult.accuracy >= 50 ? 'text-yellow-600' : 'text-red-600'
+                    }`}>
+                      {stateMachineResult.accuracy}%
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Rep Quality</span>
+                    <span className={`text-xs font-bold px-2 py-1 rounded ${
+                      stateMachineResult.repQuality === 'excellent' ? 'bg-green-100 text-green-800' :
+                      stateMachineResult.repQuality === 'good' ? 'bg-blue-100 text-blue-800' : 'bg-red-100 text-red-800'
+                    }`}>
+                      {stateMachineResult.repQuality}
+                    </span>
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    {stateMachineResult.feedback}
+                  </div>
+                  
+                  {/* State Machine Debug Info */}
+                  {debugMode && (
+                    <div className="mt-4 p-3 bg-blue-50 rounded text-xs">
+                      <div className="font-semibold mb-2">State Machine Debug:</div>
+                      <div>Distance to Start: {stateMachineResult.debugInfo.distanceToStart}</div>
+                      <div>Distance to End: {stateMachineResult.debugInfo.distanceToEnd}</div>
+                      <div>Proximity Threshold: {stateMachineResult.debugInfo.proximityThreshold}</div>
+                      {stateMachineResult.debugInfo.stateChange && (
+                        <div className="mt-2 font-semibold text-green-600">
+                          State Change: {stateMachineResult.debugInfo.stateChange}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
                 </div>
               ) : (
                 <div className="text-sm text-gray-500">
