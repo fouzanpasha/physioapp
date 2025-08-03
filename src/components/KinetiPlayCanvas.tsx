@@ -1,5 +1,4 @@
-import { useRef, useEffect } from 'react';
-import { useKinetiPlay } from '../hooks/useKinetiPlay';
+import { useRef, useEffect, useState } from 'react';
 
 // TypeScript declaration for global MediaPipe
 declare global {
@@ -14,22 +13,121 @@ declare global {
 // Helper function for angle calculation
 import { calculateAngle } from '../utils/poseUtils';
 
-export const KinetiPlayCanvas = () => {
-  // Create refs to pass to our hook
+interface KinetiPlayCanvasProps {
+  onPoseData?: (poseLandmarks: any[]) => void;
+  shouldInitialize?: boolean;
+}
+
+export const KinetiPlayCanvas = ({ onPoseData, shouldInitialize = true }: KinetiPlayCanvasProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [poseResults, setPoseResults] = useState<any>(null);
 
-  // Debug: Log when component mounts and refs are created
   useEffect(() => {
-    console.log('KinetiPlayCanvas mounted');
-    console.log('Video ref:', videoRef.current);
-    console.log('Canvas ref:', canvasRef.current);
-  }, []);
+    let pose: any = null;
+    let isInitialized = false;
 
-  // Use our custom hook to get the AI results!
-  const { results: poseResults, error, isLoading } = useKinetiPlay(videoRef, canvasRef);
+    const initializeMediaPipe = async () => {
+      if (!shouldInitialize || isInitialized) return;
 
-  // This second useEffect is for DRAWING. It runs every time `poseResults` changes.
+      try {
+        setIsLoading(true);
+        setError(null);
+
+        // Load MediaPipe from CDN
+        if (!window.Pose) {
+          const script = document.createElement('script');
+          script.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/pose.js';
+          script.async = true;
+          
+          await new Promise((resolve, reject) => {
+            script.onload = () => {
+              setTimeout(() => {
+                if (window.Pose) resolve(true);
+                else reject(new Error('Pose not available'));
+              }, 1000);
+            };
+            script.onerror = () => reject(new Error('Failed to load MediaPipe'));
+            document.head.appendChild(script);
+          });
+        }
+
+        // Initialize pose detection
+        pose = new window.Pose({
+          locateFile: (file: string) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/${file}`;
+          },
+        });
+
+        pose.setOptions({
+          modelComplexity: 1,
+          smoothLandmarks: true,
+          minDetectionConfidence: 0.5,
+          minTrackingConfidence: 0.5,
+        });
+
+        // Set up camera
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 1280, height: 720 },
+          audio: false,
+        });
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          
+          videoRef.current.onloadedmetadata = () => {
+            // Set up pose detection callback
+            pose.onResults((results: any) => {
+              setPoseResults(results);
+              setIsLoading(false);
+              
+              if (onPoseData && results.poseLandmarks) {
+                onPoseData(results.poseLandmarks);
+              }
+            });
+
+            // Start pose detection loop
+            const processFrame = async () => {
+              if (videoRef.current && isInitialized) {
+                try {
+                  await pose.send({ image: videoRef.current });
+                  requestAnimationFrame(processFrame);
+                } catch (err) {
+                  console.error("Error processing frame:", err);
+                }
+              }
+            };
+
+            isInitialized = true;
+            processFrame();
+          };
+        }
+
+      } catch (err) {
+        console.error("Error initializing MediaPipe:", err);
+        setError(err instanceof Error ? err.message : 'Failed to initialize MediaPipe');
+        setIsLoading(false);
+      }
+    };
+
+    initializeMediaPipe();
+
+    // Cleanup
+    return () => {
+      isInitialized = false;
+      if (pose) {
+        pose.close();
+      }
+      if (videoRef.current?.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [shouldInitialize, onPoseData]);
+
+  // Draw pose results
   useEffect(() => {
     if (canvasRef.current && poseResults) {
       const canvasCtx = canvasRef.current.getContext('2d');
@@ -42,56 +140,61 @@ export const KinetiPlayCanvas = () => {
       // Draw the video frame
       canvasCtx.drawImage(poseResults.image, 0, 0, canvasRef.current.width, canvasRef.current.height);
 
-      // Draw the pose landmarks (the dots)
+      // Draw the pose landmarks
       if (poseResults.poseLandmarks) {
-        // Load drawing utilities if not already loaded
-        if (window.drawLandmarks && window.drawConnectors && window.POSE_CONNECTIONS) {
-          window.drawLandmarks(canvasCtx, poseResults.poseLandmarks, { color: '#00FF00', lineWidth: 2 });
-          // Draw the pose connections (the lines)
-          window.drawConnectors(canvasCtx, poseResults.poseLandmarks, window.POSE_CONNECTIONS, { color: '#FFFFFF', lineWidth: 2 });
-        } else {
-          // Fallback: draw simple dots
-          poseResults.poseLandmarks.forEach((landmark: any) => {
-            canvasCtx.beginPath();
-            canvasCtx.arc(
-              landmark.x * canvasRef.current!.width,
-              landmark.y * canvasRef.current!.height,
-              3,
-              0,
-              2 * Math.PI
-            );
-            canvasCtx.fillStyle = '#00FF00';
-            canvasCtx.fill();
-          });
-        }
+        // Fallback: draw simple dots
+        poseResults.poseLandmarks.forEach((landmark: any) => {
+          canvasCtx.beginPath();
+          canvasCtx.arc(
+            landmark.x * canvasRef.current!.width,
+            landmark.y * canvasRef.current!.height,
+            3,
+            0,
+            2 * Math.PI
+          );
+          canvasCtx.fillStyle = '#00FF00';
+          canvasCtx.fill();
+        });
 
-        // --- Example: Calculate and draw the elbow angle ---
+        // Draw angle
         const landmarks = poseResults.poseLandmarks;
         const shoulder = landmarks[11];
         const elbow = landmarks[13];
         const wrist = landmarks[15];
 
         if (shoulder && elbow && wrist) {
-            const angle = calculateAngle(shoulder, elbow, wrist);
-            // Draw the angle on the canvas
-            canvasCtx.font = "40px Arial";
-            canvasCtx.fillStyle = "cyan";
-            canvasCtx.fillText(`Angle: ${Math.round(angle)}°`, elbow.x * canvasRef.current.width, elbow.y * canvasRef.current.height);
+          const angle = calculateAngle(shoulder, elbow, wrist);
+          canvasCtx.font = "40px Arial";
+          canvasCtx.fillStyle = "cyan";
+          canvasCtx.fillText(`Angle: ${Math.round(angle)}°`, elbow.x * canvasRef.current.width, elbow.y * canvasRef.current.height);
         }
       }
 
       canvasCtx.restore();
     }
-  }, [poseResults]); // This effect depends on poseResults
+  }, [poseResults]);
 
   return (
     <div className="relative w-full max-w-4xl">
-      {/* The video element is hidden but provides the source stream */}
-      <video ref={videoRef} className="hidden" autoPlay></video>
-      {/* The canvas is what the user sees */}
-      <canvas ref={canvasRef} width={1280} height={720} className="w-full h-auto rounded-lg"></canvas>
+      <video 
+        ref={videoRef} 
+        autoPlay 
+        playsInline
+        muted
+        style={{ 
+          position: 'absolute', 
+          top: 0,
+          left: 0,
+          width: '100%', 
+          height: '100%', 
+          opacity: 0, 
+          pointerEvents: 'none',
+          zIndex: -1
+        }}
+      />
       
-      {/* Loading overlay */}
+      <canvas ref={canvasRef} width={1280} height={720} className="w-full h-auto rounded-lg" />
+      
       {isLoading && (
         <div className="absolute inset-0 bg-gray-200 rounded-lg flex items-center justify-center">
           <div className="text-center">
@@ -101,7 +204,6 @@ export const KinetiPlayCanvas = () => {
         </div>
       )}
       
-      {/* Error overlay */}
       {error && (
         <div className="absolute inset-0 bg-red-50 border border-red-200 rounded-lg flex items-center justify-center">
           <div className="text-center">
