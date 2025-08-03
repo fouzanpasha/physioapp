@@ -31,6 +31,7 @@ export interface UserProgress {
   lastSessionTimestamp: number | null;
   totalSessions: number;
   exerciseProgress: Record<string, number>; // exerciseId -> best score
+  dailyStreak: number; // number of consecutive days with sessions
 }
 
 // UI State types

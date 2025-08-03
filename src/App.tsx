@@ -18,7 +18,8 @@ const initialState: AppState = {
     level: 1,
     lastSessionTimestamp: null,
     totalSessions: 0,
-    exerciseProgress: {}
+    exerciseProgress: {},
+    dailyStreak: 0
   }
 }
 
