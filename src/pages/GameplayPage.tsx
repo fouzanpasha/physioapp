@@ -1,5 +1,13 @@
 import { ExerciseTemplate, GameSession } from '../types';
 import { useState, useEffect, useCallback } from 'react';
+import { KinetiPlayCanvas } from '../components/KinetiPlayCanvas';
+
+// TypeScript declaration for global MediaPipe
+declare global {
+  interface Window {
+    Pose: any;
+  }
+}
 
 interface FormFeedback {
   id: string;
@@ -16,15 +24,16 @@ interface GameplayPageProps {
 export default function GameplayPage({ exercise, onGameComplete }: GameplayPageProps) {
   const [score, setScore] = useState(0);
   const [currentRep, setCurrentRep] = useState(0);
-  const [sessionStartTime, setSessionStartTime] = useState(Date.now());
+  const [sessionStartTime] = useState(Date.now());
+  const [startMediaPipe, setStartMediaPipe] = useState(false);
   const [formFeedback, setFormFeedback] = useState<FormFeedback[]>([
     { id: 'posture', message: 'Good posture', status: 'green', points: 3 },
     { id: 'arms', message: 'Lift arms higher', status: 'yellow', points: 1 },
     { id: 'speed', message: 'Good speed', status: 'green', points: 3 }
   ]);
 
-  // Calculate total possible points per evaluation
-  const totalPossiblePoints = formFeedback.reduce((sum, feedback) => sum + 3, 0);
+  // Calculate total possible points per evaluation (unused for now)
+  // const totalPossiblePoints = formFeedback.reduce((sum) => sum + 3, 0);
 
   // Update score based on current form feedback
   const updateScore = useCallback(() => {
@@ -45,6 +54,8 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
 
   // Simulate form feedback changes every 2 seconds
   useEffect(() => {
+    // Temporarily disabled to fix MediaPipe initialization
+    /*
     const interval = setInterval(() => {
       setFormFeedback(prev => prev.map(feedback => {
         // Simulate random status changes for demo purposes
@@ -81,6 +92,7 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
     }, 2000);
 
     return () => clearInterval(interval);
+    */
   }, [updateScore]);
 
   // Calculate accuracy based on average form quality
@@ -111,6 +123,10 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
     onGameComplete(session);
   };
 
+  const startMediaPipeDetection = () => {
+    setStartMediaPipe(true);
+  };
+
   return (
     <div className="min-h-screen p-4">
       <div className="max-w-6xl mx-auto">
@@ -126,15 +142,27 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
         
         {/* Main Game Area */}
         <div className="grid lg:grid-cols-3 gap-6">
-          {/* Video Feed */}
+          {/* Video Feed with Pose Detection */}
           <div className="lg:col-span-2">
             <div className="card">
-              <div className="aspect-video bg-gray-900 rounded-lg flex items-center justify-center mb-4">
-                <div className="text-white text-center">
-                  <div className="text-6xl mb-4">📹</div>
-                  <p>Camera feed will appear here</p>
-                  <p className="text-sm opacity-70">MediaPipe pose estimation overlay</p>
-                </div>
+              <div className="mb-4">
+                {!startMediaPipe ? (
+                  <div className="w-full h-96 bg-gray-200 rounded-lg flex items-center justify-center">
+                    <div className="text-center">
+                      <div className="text-4xl mb-2">📹</div>
+                      <p className="text-gray-600">Ready to Start MediaPipe</p>
+                      <p className="text-sm text-gray-500 mb-4">Click the button below to start pose detection</p>
+                      <button 
+                        onClick={startMediaPipeDetection}
+                        className="bg-green-500 text-white px-6 py-3 rounded-lg hover:bg-green-600 font-semibold"
+                      >
+                        Start Pose Detection
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <KinetiPlayCanvas />
+                )}
               </div>
             </div>
           </div>

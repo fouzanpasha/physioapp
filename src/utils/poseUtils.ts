@@ -55,3 +55,32 @@ export function getFeedbackColor(distance: number, threshold: number = 0.1): str
   if (distance <= threshold * 2) return '#F59E0B'; // Yellow
   return '#EF4444'; // Red
 }
+
+/**
+ * Calculate angle between three points (for joints like elbow, knee, etc.)
+ */
+export function calculateAngle(point1: any, point2: any, point3: any): number {
+  // Calculate vectors
+  const vector1 = {
+    x: point1.x - point2.x,
+    y: point1.y - point2.y
+  };
+  
+  const vector2 = {
+    x: point3.x - point2.x,
+    y: point3.y - point2.y
+  };
+  
+  // Calculate dot product
+  const dotProduct = vector1.x * vector2.x + vector1.y * vector2.y;
+  
+  // Calculate magnitudes
+  const magnitude1 = Math.sqrt(vector1.x * vector1.x + vector1.y * vector1.y);
+  const magnitude2 = Math.sqrt(vector2.x * vector2.x + vector2.y * vector2.y);
+  
+  // Calculate angle in radians, then convert to degrees
+  const angleRadians = Math.acos(dotProduct / (magnitude1 * magnitude2));
+  const angleDegrees = angleRadians * (180 / Math.PI);
+  
+  return angleDegrees;
+}
