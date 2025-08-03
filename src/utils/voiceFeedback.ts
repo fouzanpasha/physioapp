@@ -77,7 +77,8 @@ export class VoiceFeedbackSystem {
 
     let feedbackMessage = '';
 
-    // Check for rep completion first (highest priority)
+    // ONLY provide feedback for rep completion and state changes
+    // Disable form correction spam for now
     if (currentRep > this.lastRepCount) {
       feedbackMessage = this.getRepCompletionFeedback(currentRep, stateMachineResult);
       this.lastRepCount = currentRep;
@@ -88,17 +89,6 @@ export class VoiceFeedbackSystem {
              !stateMachineResult.debugInfo.stateChange.includes('REP COMPLETE')) {
       feedbackMessage = this.getStateChangeFeedback(stateMachineResult);
       console.log('Voice: State change feedback');
-    }
-    // Check for form issues (only if accuracy is significantly low and we have form data)
-    else if (formAnalysis && formAnalysis.accuracy !== undefined && formAnalysis.accuracy < 50) {
-      feedbackMessage = this.getFormCorrectionFeedback(formAnalysis);
-      console.log('Voice: Form correction feedback');
-    }
-    // Provide encouragement for good form (only occasionally)
-    else if (formAnalysis && formAnalysis.accuracy !== undefined && formAnalysis.accuracy > 85 && 
-             Math.random() < 0.3) { // 30% chance to avoid spam
-      feedbackMessage = this.getEncouragementFeedback(formAnalysis);
-      console.log('Voice: Encouragement feedback');
     }
 
     if (feedbackMessage) {

@@ -4,6 +4,7 @@ import { KinetiPlayCanvas } from '../components/KinetiPlayCanvas';
 import { analyzeForm, FormAnalysisResult, ExerciseTemplate as FormTemplate, detectRepetition } from '../utils/formAnalysis';
 import { RepetitionStateMachine, StateMachineResult } from '../utils/stateMachineAnalysis';
 import { VoiceFeedbackSystem } from '../utils/voiceFeedback';
+import { analyzeSimpleForm, SimpleFormResult } from '../utils/simpleFormAnalysis';
 import { useExerciseRecording } from '../hooks/useExerciseRecording';
 
 // TypeScript declaration for global MediaPipe
@@ -32,6 +33,7 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
   const [debugMode, setDebugMode] = useState(false);
   const [useStateMachine, setUseStateMachine] = useState(true); // Toggle between state machine and old system
   const [voiceFeedbackEnabled, setVoiceFeedbackEnabled] = useState(true);
+  const [useSimpleFormAnalysis, setUseSimpleFormAnalysis] = useState(true); // Toggle between simple and complex form analysis
   
   // State machine for rep tracking
   const [stateMachine, setStateMachine] = useState<RepetitionStateMachine | null>(null);
@@ -42,6 +44,7 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
   const [repQuality, setRepQuality] = useState<'poor' | 'good' | 'excellent'>('poor');
   const [activeArm, setActiveArm] = useState<'left' | 'right' | 'both'>('right');
   const [lastRepTime, setLastRepTime] = useState<number>(0);
+  const [simpleFormResult, setSimpleFormResult] = useState<SimpleFormResult | null>(null);
   
   const frameIndexRef = useRef(0);
   const analysisIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -85,12 +88,26 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
 
   // Analyze form when pose data is available
   const analyzeCurrentForm = useCallback((poseLandmarks: any[]) => {
-    if (!poseLandmarks) return;
+    if (!poseLandmarks) {
+      console.log('❌ No pose landmarks received');
+      return;
+    }
+    
+    console.log('✅ Pose landmarks received:', {
+      count: poseLandmarks.length,
+      hasData: poseLandmarks.some(landmark => landmark && (landmark.x !== undefined || landmark.y !== undefined)),
+      sampleLandmarks: poseLandmarks.slice(0, 3).map(l => ({ x: l?.x, y: l?.y, z: l?.z }))
+    });
 
     // Record frame if in recording mode
     if (recordingState.isRecording) {
       recordFrame(poseLandmarks);
     }
+
+    // Run simple form analysis for real-time feedback
+    const simpleFormResult = analyzeSimpleForm(poseLandmarks);
+    setSimpleFormResult(simpleFormResult);
+    console.log('🎯 Simple Form Result:', simpleFormResult);
 
     if (useStateMachine && stateMachine) {
       // Use state machine for rep detection and form analysis
@@ -127,19 +144,34 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
           const frameIndex = Math.floor((currentTime / templateDuration) * template.frames.length);
           const boundedFrameIndex = Math.min(frameIndex, template.frames.length - 1);
           
+          console.log('🔍 Form Analysis Debug:', {
+            currentTime: Math.floor(currentTime / 1000) + 's',
+            templateDuration: templateDuration + 's',
+            frameIndex: frameIndex,
+            boundedFrameIndex: boundedFrameIndex,
+            totalFrames: template.frames.length,
+            poseLandmarksCount: poseLandmarks?.length || 0
+          });
+          
           const analysis = analyzeForm(poseLandmarks, template, boundedFrameIndex);
+          console.log('📊 Analysis Result:', {
+            accuracy: analysis.accuracy,
+            status: analysis.status,
+            feedback: analysis.feedback,
+            points: analysis.points
+          });
+          
           setCurrentFormAnalysis(analysis);
           
           frameIndexRef.current = boundedFrameIndex;
         }
         
-        // Provide voice feedback only on significant events
+        // Provide voice feedback only on rep completion and state changes
         if (voiceFeedback && (
           result.debugInfo.stateChange || // State changes
-          result.repCount > currentRep || // Rep completion
-          (currentFormAnalysis && currentFormAnalysis.accuracy < 50) // Poor form
+          result.repCount > currentRep // Rep completion
         )) {
-          console.log('🎤 Calling voice feedback - State change:', result.debugInfo.stateChange, 'Rep count:', result.repCount, 'Accuracy:', currentFormAnalysis?.accuracy);
+          console.log('🎤 Calling voice feedback - State change:', result.debugInfo.stateChange, 'Rep count:', result.repCount);
           voiceFeedback.provideFeedback(result, currentFormAnalysis, result.repCount, score);
         }
       } catch (error) {
@@ -154,7 +186,23 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
           const frameIndex = Math.floor((currentTime / templateDuration) * template.frames.length);
           const boundedFrameIndex = Math.min(frameIndex, template.frames.length - 1);
           
+          console.log('🔍 Legacy Form Analysis Debug:', {
+            currentTime: Math.floor((Date.now() - sessionStartTime) / 1000) + 's',
+            templateDuration: template.duration + 's',
+            frameIndex: frameIndex,
+            boundedFrameIndex: boundedFrameIndex,
+            totalFrames: template.frames.length,
+            poseLandmarksCount: poseLandmarks?.length || 0
+          });
+          
           const analysis = analyzeForm(poseLandmarks, template, boundedFrameIndex);
+          console.log('📊 Legacy Analysis Result:', {
+            accuracy: analysis.accuracy,
+            status: analysis.status,
+            feedback: analysis.feedback,
+            points: analysis.points
+          });
+          
           setCurrentFormAnalysis(analysis);
           updateScore(analysis);
           
@@ -188,11 +236,8 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
           
           frameIndexRef.current = boundedFrameIndex;
           
-          // Provide voice feedback for legacy system only on significant events
-          if (voiceFeedback && (
-            repDetection.isRepComplete || // Rep completion
-            (analysis.accuracy < 50) // Poor form
-          )) {
+          // Provide voice feedback for legacy system only on rep completion
+          if (voiceFeedback && repDetection.isRepComplete) {
             voiceFeedback.provideFeedback(null, analysis, currentRep, score);
           }
         } catch (error) {
@@ -361,6 +406,16 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
               }`}
             >
               {voiceFeedbackEnabled ? 'Voice On' : 'Voice Off'}
+            </button>
+            <button 
+              onClick={() => setUseSimpleFormAnalysis(!useSimpleFormAnalysis)}
+              className={`text-sm px-2 py-1 rounded ${
+                useSimpleFormAnalysis 
+                  ? 'bg-orange-500 text-white' 
+                  : 'bg-gray-500 text-white'
+              }`}
+            >
+              {useSimpleFormAnalysis ? 'Simple Form' : 'Complex Form'}
             </button>
           </div>
         </div>
@@ -711,6 +766,40 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
                 )}
               </div>
             </div>
+
+            {/* Simple Form Analysis Display */}
+            {useSimpleFormAnalysis && simpleFormResult && (
+              <div className="card">
+                <h3 className="text-lg font-semibold mb-3">Simple Form Analysis</h3>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Arm Position</span>
+                    <span className={`text-xs font-bold px-2 py-1 rounded ${
+                      simpleFormResult.armPosition === 'up' ? 'bg-green-100 text-green-800' :
+                      simpleFormResult.armPosition === 'raising' ? 'bg-blue-100 text-blue-800' :
+                      'bg-gray-100 text-gray-800'
+                    }`}>
+                      {simpleFormResult.armPosition.toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Arm Height</span>
+                    <span className="font-bold">{Math.round(simpleFormResult.armHeight)}%</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Form Status</span>
+                    <span className={`text-xs font-bold px-2 py-1 rounded ${
+                      simpleFormResult.isInGoodPosition ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                    }`}>
+                      {simpleFormResult.isInGoodPosition ? 'GOOD' : 'NEEDS WORK'}
+                    </span>
+                  </div>
+                  <div className="p-2 bg-gray-50 rounded text-sm text-gray-700">
+                    {simpleFormResult.feedback}
+                  </div>
+                </div>
+              </div>
+            )}
             
             {/* Sky Painter Game */}
             <div className="card">
