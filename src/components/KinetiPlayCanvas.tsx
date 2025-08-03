@@ -19,6 +19,13 @@ export const KinetiPlayCanvas = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  // Debug: Log when component mounts and refs are created
+  useEffect(() => {
+    console.log('KinetiPlayCanvas mounted');
+    console.log('Video ref:', videoRef.current);
+    console.log('Canvas ref:', canvasRef.current);
+  }, []);
+
   // Use our custom hook to get the AI results!
   const { results: poseResults, error, isLoading } = useKinetiPlay(videoRef, canvasRef);
 

@@ -20,6 +20,10 @@ export const useKinetiPlay = (
 
   // useEffect is where we put all the side-effect logic, like setting up the camera and AI
   useEffect(() => {
+    console.log('useKinetiPlay hook started');
+    console.log('Video ref at start:', videoRef.current);
+    console.log('Canvas ref at start:', canvasRef.current);
+    
     // A flag to ensure we don't run the cleanup on an uninitialized hook
     let isInitialized = true;
     let cameraStream: MediaStream | null = null;
