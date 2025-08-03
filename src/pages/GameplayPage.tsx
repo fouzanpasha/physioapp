@@ -32,6 +32,7 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
   const [debugMode, setDebugMode] = useState(false);
   const [useStateMachine, setUseStateMachine] = useState(true); // Toggle between state machine and old system
   const [voiceFeedbackEnabled, setVoiceFeedbackEnabled] = useState(true);
+  const [geminiVoiceEnabled, setGeminiVoiceEnabled] = useState(false); // New state for Gemini voice
   
   // State machine for rep tracking
   const [stateMachine, setStateMachine] = useState<RepetitionStateMachine | null>(null);
@@ -84,7 +85,8 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
           volume: 0.8,
           rate: 0.9,
           pitch: 1.0,
-          voiceType: 'neutral'
+          voiceType: 'neutral',
+          useGeminiVoice: geminiVoiceEnabled
         });
         setVoiceFeedback(newVoiceFeedback);
         
@@ -98,7 +100,7 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
     };
     
     loadTemplate();
-  }, [exercise.name, voiceFeedbackEnabled]);
+  }, [exercise.name, voiceFeedbackEnabled, geminiVoiceEnabled]);
 
   // Update score based on current form analysis
   const updateScore = useCallback((analysis: FormAnalysisResult) => {
@@ -424,6 +426,21 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
               }`}
             >
               {voiceFeedbackEnabled ? 'Voice On' : 'Voice Off'}
+            </button>
+            <button 
+              onClick={() => {
+                setGeminiVoiceEnabled(!geminiVoiceEnabled);
+                if (voiceFeedback) {
+                  voiceFeedback.enableGeminiVoice(!geminiVoiceEnabled);
+                }
+              }}
+              className={`text-sm px-2 py-1 rounded ${
+                geminiVoiceEnabled 
+                  ? 'bg-blue-500 text-white' 
+                  : 'bg-gray-500 text-white'
+              }`}
+            >
+              {geminiVoiceEnabled ? 'Gemini On' : 'Gemini Off'}
             </button>
 
           </div>

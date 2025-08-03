@@ -155,8 +155,8 @@ function analyzeExercisePhase(currentLandmarks: any[], templateFrames: any[][]):
     const leftArmHeight = leftShoulder.y - leftWrist.y;
     
     // Check if both arms are moving significantly
-    const rightMoving = Math.abs(rightArmHeight) > 0.1;
-    const leftMoving = Math.abs(leftArmHeight) > 0.1;
+    const rightMoving = Math.abs(rightArmHeight) > 0.05; // More sensitive threshold
+    const leftMoving = Math.abs(leftArmHeight) > 0.05;
     
     if (rightMoving && leftMoving) {
       activeArm = 'both';
@@ -167,18 +167,19 @@ function analyzeExercisePhase(currentLandmarks: any[], templateFrames: any[][]):
       activeArm = 'left';
       currentWrist = leftWrist;
       currentShoulder = leftShoulder;
-    } else {
+    } else if (rightMoving && !leftMoving) {
       activeArm = 'right';
       currentWrist = rightWrist;
       currentShoulder = rightShoulder;
+    } else {
+      // Neither arm is moving significantly - this is rest position
+      return { phase: 'rest', phaseProgress: 0, accuracy: 0, activeArm: 'right' };
     }
   } else if (leftWrist && leftShoulder && (!rightWrist || !rightShoulder)) {
     activeArm = 'left';
     currentWrist = leftWrist;
     currentShoulder = leftShoulder;
-  }
-
-  if (!currentWrist || !currentShoulder) {
+  } else if (!currentWrist || !currentShoulder) {
     return { phase: 'rest', phaseProgress: 0, accuracy: 0, activeArm: 'right' };
   }
 
@@ -186,43 +187,53 @@ function analyzeExercisePhase(currentLandmarks: any[], templateFrames: any[][]):
   const armHeight = currentShoulder.y - currentWrist.y; // Positive = arm above shoulder
   const armHeightPercent = Math.max(0, Math.min(1, (armHeight + 0.2) / 0.4)); // Normalize to 0-1
 
-  // Determine exercise phase based on arm position
+  // More precise phase detection
   let phase: 'rest' | 'raising' | 'raised' | 'lowering';
   let phaseProgress: number;
 
-  if (armHeightPercent < 0.1) {
-    // Arm is at rest position (below or at shoulder level)
+  if (armHeightPercent < 0.05) {
+    // Arm is at rest position (very close to shoulder level)
     phase = 'rest';
     phaseProgress = 0;
-  } else if (armHeightPercent < 0.7) {
+  } else if (armHeightPercent < 0.6) {
     // Arm is being raised
     phase = 'raising';
-    phaseProgress = (armHeightPercent - 0.1) / 0.6;
-  } else if (armHeightPercent < 0.9) {
+    phaseProgress = (armHeightPercent - 0.05) / 0.55;
+  } else if (armHeightPercent < 0.85) {
     // Arm is raised
     phase = 'raised';
     phaseProgress = 1;
   } else {
     // Arm is being lowered
     phase = 'lowering';
-    phaseProgress = 1 - (armHeightPercent - 0.9) / 0.1;
+    phaseProgress = 1 - (armHeightPercent - 0.85) / 0.15;
   }
 
-  // Calculate accuracy based on phase
+  // Calculate accuracy based on phase with more precision
   let accuracy = 0;
 
   if (phase === 'rest') {
-    // At rest, accuracy should be low (0-20%)
-    accuracy = Math.random() * 20; // Random low accuracy
+    // At rest, accuracy should be very low (0-10%) to indicate no exercise is happening
+    accuracy = Math.random() * 10;
   } else if (phase === 'raising') {
-    // During raising, accuracy should be moderate (30-70%)
-    accuracy = 30 + (phaseProgress * 40);
+    // During raising, accuracy should be moderate (20-80%) based on how well they're following the path
+    accuracy = 20 + (phaseProgress * 60);
+    
+    // Add bonus for smooth movement
+    if (phaseProgress > 0.3 && phaseProgress < 0.7) {
+      accuracy += 10; // Bonus for middle range
+    }
   } else if (phase === 'raised') {
-    // At raised position, compare to template raised frames
+    // At raised position, compare to template raised frames with higher precision
     accuracy = compareToRaisedTemplate(currentLandmarks, templateFrames, activeArm);
+    
+    // Add bonus for holding position
+    if (accuracy > 70) {
+      accuracy += 5; // Small bonus for good hold
+    }
   } else if (phase === 'lowering') {
-    // During lowering, accuracy should be moderate (30-70%)
-    accuracy = 30 + (phaseProgress * 40);
+    // During lowering, accuracy should be moderate (20-80%)
+    accuracy = 20 + (phaseProgress * 60);
   }
 
   return { phase, phaseProgress, accuracy, activeArm };

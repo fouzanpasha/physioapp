@@ -1,9 +1,13 @@
+import { GeminiVoiceSystem } from './geminiVoice';
+
 export interface VoiceFeedbackConfig {
   enabled: boolean;
   volume: number;
   rate: number;
   pitch: number;
   voiceType: 'male' | 'female' | 'neutral';
+  useGeminiVoice?: boolean; // New flag for Gemini voice
+  geminiApiKey?: string; // API key for Gemini
 }
 
 export class VoiceFeedbackSystem {
@@ -17,16 +21,23 @@ export class VoiceFeedbackSystem {
   private consecutiveFormIssues: number = 0; // Track consecutive form issues
   private lastFormAccuracy: number = 100; // Track previous accuracy
   private sessionStartTime: number = Date.now();
+  private lastPhase: string = 'rest'; // Track exercise phase
+  private geminiVoice: GeminiVoiceSystem; // Gemini voice system
 
   constructor(config: VoiceFeedbackConfig = {
     enabled: true,
     volume: 0.7, // Reduced volume
     rate: 0.85, // Slightly slower for clarity
     pitch: 1.0,
-    voiceType: 'neutral'
+    voiceType: 'neutral',
+    useGeminiVoice: false // Default to TTS for now
   }) {
     this.speechSynthesis = window.speechSynthesis;
     this.config = config;
+    this.geminiVoice = new GeminiVoiceSystem({
+      enabled: config.useGeminiVoice || false,
+      apiKey: config.geminiApiKey
+    });
     this.initializeVoice();
   }
 
@@ -78,6 +89,15 @@ export class VoiceFeedbackSystem {
       return; // Still in cooldown
     }
 
+    // Get current exercise phase
+    const currentPhase = formAnalysis?.phase || 'rest';
+    
+    // Don't provide feedback if user is in neutral/rest position (unless it's a rep completion)
+    if (currentPhase === 'rest' && currentRep <= this.lastRepCount) {
+      this.lastPhase = currentPhase;
+      return; // Stay quiet in neutral position
+    }
+
     let feedbackMessage = '';
 
     // Check for rep completion first (highest priority)
@@ -87,25 +107,28 @@ export class VoiceFeedbackSystem {
       this.consecutiveFormIssues = 0; // Reset form issues on good rep
       console.log('Voice: Rep completion feedback');
     }
-    // Check for significant state changes (only if not a rep completion)
+    // Check for significant state changes (only if not a rep completion and not in rest)
     else if (stateMachineResult?.debugInfo?.stateChange && 
-             !stateMachineResult.debugInfo.stateChange.includes('REP COMPLETE')) {
+             !stateMachineResult.debugInfo.stateChange.includes('REP COMPLETE') &&
+             currentPhase !== 'rest') {
       feedbackMessage = this.getStateChangeFeedback(stateMachineResult);
       console.log('Voice: State change feedback');
     }
-    // Check for persistent form issues (only if accuracy is very low and getting worse)
+    // Check for persistent form issues (only if accuracy is very low and getting worse, and not in rest)
     else if (formAnalysis && formAnalysis.accuracy !== undefined && 
              formAnalysis.accuracy < 25 && 
              formAnalysis.accuracy < this.lastFormAccuracy &&
-             this.consecutiveFormIssues >= 2) {
+             this.consecutiveFormIssues >= 2 &&
+             currentPhase !== 'rest') {
       feedbackMessage = this.getIntelligentFormCorrectionFeedback(formAnalysis);
       this.consecutiveFormIssues++;
       console.log('Voice: Intelligent form correction feedback');
     }
-    // Provide encouragement for excellent form (only occasionally and with very high threshold)
+    // Provide encouragement for excellent form (only occasionally and with very high threshold, and not in rest)
     else if (formAnalysis && formAnalysis.accuracy !== undefined && 
              formAnalysis.accuracy > 95 && 
-             Math.random() < 0.1) { // Only 10% chance to avoid spam
+             Math.random() < 0.1 && // Only 10% chance to avoid spam
+             currentPhase !== 'rest') {
       feedbackMessage = this.getEncouragementFeedback(formAnalysis);
       console.log('Voice: Encouragement feedback');
     }
@@ -119,6 +142,9 @@ export class VoiceFeedbackSystem {
       }
       this.lastFormAccuracy = formAnalysis.accuracy;
     }
+
+    // Update phase tracking
+    this.lastPhase = currentPhase;
 
     if (feedbackMessage) {
       console.log('🎤 Voice feedback triggered:', feedbackMessage);
@@ -308,6 +334,13 @@ export class VoiceFeedbackSystem {
       this.speechSynthesis.cancel();
     }
 
+    // Use Gemini voice if enabled and available
+    if (this.config.useGeminiVoice && this.geminiVoice.isEnabled()) {
+      this.geminiVoice.speak(text);
+      return;
+    }
+
+    // Fallback to regular TTS
     this.currentUtterance = new SpeechSynthesisUtterance(text);
     this.currentUtterance.volume = this.config.volume;
     this.currentUtterance.rate = this.config.rate;
@@ -327,11 +360,13 @@ export class VoiceFeedbackSystem {
 
   public stop() {
     this.speechSynthesis.cancel();
+    this.geminiVoice.stop();
     this.currentUtterance = null;
   }
 
   public pause() {
     this.speechSynthesis.pause();
+    this.geminiVoice.stop();
   }
 
   public resume() {
@@ -347,5 +382,15 @@ export class VoiceFeedbackSystem {
     if (!this.config.enabled) {
       this.stop();
     }
+  }
+
+  public setGeminiApiKey(apiKey: string) {
+    this.config.geminiApiKey = apiKey;
+    this.geminiVoice.setApiKey(apiKey);
+  }
+
+  public enableGeminiVoice(enabled: boolean) {
+    this.config.useGeminiVoice = enabled;
+    this.geminiVoice.updateConfig({ enabled });
   }
 } 
