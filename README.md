@@ -48,11 +48,10 @@ src/
 
 ### Core Features (Must Have)
 - [x] Welcome page and navigation flow
-- [ ] Camera integration with MediaPipe Pose
-- [ ] Real-time pose estimation and overlay
-- [ ] Shoulder abduction exercise with template matching
-- [ ] "Sky Painter" gamification
-- [ ] Scoring system and progress tracking
+- [x] Camera integration with MediaPipe Pose
+- [x] Real-time pose estimation and overlay
+- [x] Shoulder abduction exercise with template matching
+- [x] Tree garden leaderboard
 
 ### User Flow
 1. **Welcome** → Click "Start Your Journey"
@@ -104,49 +103,3 @@ npm run build        # Build for production
 npm run preview      # Preview production build
 npm run lint         # Run ESLint
 ```
-
-## 📊 Current Status
-
-### ✅ Completed
-- Project structure and configuration
-- All main page components with navigation
-- TypeScript type definitions
-- Utility functions for pose calculations
-- Basic styling with Tailwind CSS
-- localStorage integration
-
-### 🚧 In Progress
-- MediaPipe Pose integration
-- Camera feed implementation
-- Real-time pose tracking
-
-### 📋 Todo
-- Exercise template recording system
-- Canvas-based Sky Painter game
-- Score calculation algorithm
-- Progress visualization improvements
-- Mobile optimization
-
-## 🎮 Game Mechanics
-
-### Sky Painter
-- User's arm movements paint colors in the sky
-- Accuracy determines brush size and color intensity
-- Perfect form creates beautiful, smooth strokes
-- Poor form creates choppy, faded lines
-
-### Scoring System
-- Base points for completing reps
-- Bonus points for accuracy (staying close to template)
-- Time bonuses for maintaining good form
-- Combo multipliers for consecutive good reps
-
-### Progression
-- XP gained based on session performance
-- Levels unlock new garden elements
-- Achievements for milestones and consistency
-- Visual progress in "Recovery Garden"
-
----
-
-**Happy Hacking! 🚀**
