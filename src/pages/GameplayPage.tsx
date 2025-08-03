@@ -32,7 +32,9 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
   const [debugMode, setDebugMode] = useState(false);
   const [useStateMachine, setUseStateMachine] = useState(true); // Toggle between state machine and old system
   const [voiceFeedbackEnabled, setVoiceFeedbackEnabled] = useState(true);
-  const [geminiVoiceEnabled, setGeminiVoiceEnabled] = useState(false); // New state for Gemini voice
+  const [geminiVoiceEnabled, setGeminiVoiceEnabled] = useState(true); // New state for Gemini voice
+  const [geminiApiKey, setGeminiApiKey] = useState('AIzaSyBWXLZirnMBowVOMDBezhptKHfIAanGs58'); // State for API key
+  const [showApiKeyInput, setShowApiKeyInput] = useState(false); // Toggle API key input visibility
   
   // State machine for rep tracking
   const [stateMachine, setStateMachine] = useState<RepetitionStateMachine | null>(null);
@@ -52,6 +54,12 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
 
   // Load template and initialize state machine on component mount
   useEffect(() => {
+    // Load saved API key
+    const savedApiKey = localStorage.getItem('geminiApiKey');
+    if (savedApiKey) {
+      setGeminiApiKey(savedApiKey);
+    }
+
     const loadTemplate = async () => {
       // First try to load from localStorage
       const templates = JSON.parse(localStorage.getItem('exerciseTemplates') || '{}');
@@ -86,7 +94,8 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
           rate: 0.9,
           pitch: 1.0,
           voiceType: 'neutral',
-          useGeminiVoice: geminiVoiceEnabled
+          useGeminiVoice: true, // Always use Gemini voice
+          geminiApiKey: 'AIzaSyBWXLZirnMBowVOMDBezhptKHfIAanGs58'
         });
         setVoiceFeedback(newVoiceFeedback);
         
@@ -100,7 +109,7 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
     };
     
     loadTemplate();
-  }, [exercise.name, voiceFeedbackEnabled, geminiVoiceEnabled]);
+  }, [exercise.name, voiceFeedbackEnabled, geminiVoiceEnabled, geminiApiKey]);
 
   // Update score based on current form analysis
   const updateScore = useCallback((analysis: FormAnalysisResult) => {
@@ -429,9 +438,16 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
             </button>
             <button 
               onClick={() => {
+                if (!geminiApiKey && !geminiVoiceEnabled) {
+                  setShowApiKeyInput(true);
+                  return;
+                }
                 setGeminiVoiceEnabled(!geminiVoiceEnabled);
                 if (voiceFeedback) {
                   voiceFeedback.enableGeminiVoice(!geminiVoiceEnabled);
+                  if (!geminiVoiceEnabled && geminiApiKey) {
+                    voiceFeedback.setGeminiApiKey(geminiApiKey);
+                  }
                 }
               }}
               className={`text-sm px-2 py-1 rounded ${
@@ -443,6 +459,50 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
               {geminiVoiceEnabled ? 'Gemini On' : 'Gemini Off'}
             </button>
 
+            {/* API Key Input */}
+            {showApiKeyInput && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                <div className="bg-white p-6 rounded-lg max-w-md w-full mx-4">
+                  <h3 className="text-lg font-semibold mb-4">Enter Gemini API Key</h3>
+                  <p className="text-sm text-gray-600 mb-4">
+                    To use Gemini voice, you need a Google AI Studio API key. 
+                    Get one at <a href="https://aistudio.google.com/" target="_blank" rel="noopener noreferrer" className="text-blue-500 underline">aistudio.google.com</a>
+                  </p>
+                  <input
+                    type="password"
+                    placeholder="Enter your API key here..."
+                    value={geminiApiKey}
+                    onChange={(e) => setGeminiApiKey(e.target.value)}
+                    className="w-full p-2 border border-gray-300 rounded mb-4"
+                  />
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={() => {
+                        if (geminiApiKey.trim()) {
+                          setGeminiVoiceEnabled(true);
+                          if (voiceFeedback) {
+                            voiceFeedback.setGeminiApiKey(geminiApiKey);
+                            voiceFeedback.enableGeminiVoice(true);
+                          }
+                          // Save API key to localStorage
+                          localStorage.setItem('geminiApiKey', geminiApiKey);
+                          setShowApiKeyInput(false);
+                        }
+                      }}
+                      className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                    >
+                      Enable Gemini Voice
+                    </button>
+                    <button
+                      onClick={() => setShowApiKeyInput(false)}
+                      className="bg-gray-300 text-gray-700 px-4 py-2 rounded hover:bg-gray-400"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
         

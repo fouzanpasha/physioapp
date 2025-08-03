@@ -11,10 +11,12 @@ export class GeminiVoiceSystem {
   private isPlaying: boolean = false;
 
   constructor(config: GeminiVoiceConfig = {
-    enabled: false,
+    enabled: true,
     model: 'gemini-1.5-flash'
   }) {
     this.config = config;
+    // Hardcode the API key
+    this.config.apiKey = 'AIzaSyBWXLZirnMBowVOMDBezhptKHfIAanGs58';
   }
 
   public updateConfig(newConfig: Partial<GeminiVoiceConfig>) {

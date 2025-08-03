@@ -30,7 +30,7 @@ export class VoiceFeedbackSystem {
     rate: 0.85, // Slightly slower for clarity
     pitch: 1.0,
     voiceType: 'neutral',
-    useGeminiVoice: false // Default to TTS for now
+    useGeminiVoice: true // Default to Gemini voice
   }) {
     this.speechSynthesis = window.speechSynthesis;
     this.config = config;
@@ -100,42 +100,27 @@ export class VoiceFeedbackSystem {
 
     let feedbackMessage = '';
 
-    // Check for rep completion first (highest priority)
+    // ONLY speak on rep completion - much simpler and less annoying
     if (currentRep > this.lastRepCount) {
       feedbackMessage = this.getRepCompletionFeedback(currentRep, stateMachineResult);
       this.lastRepCount = currentRep;
       this.consecutiveFormIssues = 0; // Reset form issues on good rep
       console.log('Voice: Rep completion feedback');
     }
-    // Check for significant state changes (only if not a rep completion and not in rest)
-    else if (stateMachineResult?.debugInfo?.stateChange && 
-             !stateMachineResult.debugInfo.stateChange.includes('REP COMPLETE') &&
-             currentPhase !== 'rest') {
-      feedbackMessage = this.getStateChangeFeedback(stateMachineResult);
-      console.log('Voice: State change feedback');
-    }
-    // Check for persistent form issues (only if accuracy is very low and getting worse, and not in rest)
+    // Only give form feedback if accuracy is very poor and we haven't spoken recently
     else if (formAnalysis && formAnalysis.accuracy !== undefined && 
-             formAnalysis.accuracy < 25 && 
-             formAnalysis.accuracy < this.lastFormAccuracy &&
-             this.consecutiveFormIssues >= 2 &&
-             currentPhase !== 'rest') {
+             formAnalysis.accuracy < 15 && // Much lower threshold
+             this.consecutiveFormIssues >= 5 && // Much higher threshold
+             currentPhase !== 'rest' &&
+             currentTime - this.lastFeedbackTime > 20000) { // 20 second minimum between form feedback
       feedbackMessage = this.getIntelligentFormCorrectionFeedback(formAnalysis);
       this.consecutiveFormIssues++;
-      console.log('Voice: Intelligent form correction feedback');
-    }
-    // Provide encouragement for excellent form (only occasionally and with very high threshold, and not in rest)
-    else if (formAnalysis && formAnalysis.accuracy !== undefined && 
-             formAnalysis.accuracy > 95 && 
-             Math.random() < 0.1 && // Only 10% chance to avoid spam
-             currentPhase !== 'rest') {
-      feedbackMessage = this.getEncouragementFeedback(formAnalysis);
-      console.log('Voice: Encouragement feedback');
+      console.log('Voice: Form correction feedback (rare)');
     }
 
     // Update form tracking
     if (formAnalysis && formAnalysis.accuracy !== undefined) {
-      if (formAnalysis.accuracy < 30) {
+      if (formAnalysis.accuracy < 20) {
         this.consecutiveFormIssues++;
       } else {
         this.consecutiveFormIssues = Math.max(0, this.consecutiveFormIssues - 1);
