@@ -344,20 +344,23 @@ export class VoiceFeedbackSystem {
   }
 
   public stop() {
-    // Stop all speech synthesis
-    this.speechSynthesis.cancel();
-    this.speechSynthesis.pause();
+    // Stop browser speech synthesis
+    if (this.speechSynthesis) {
+      this.speechSynthesis.cancel();
+    }
     
     // Stop Gemini voice
-    this.geminiVoice.stop();
+    if (this.geminiVoice) {
+      this.geminiVoice.stop();
+    }
     
     // Clear current utterance
     this.currentUtterance = null;
     
-    // Reset feedback timing to prevent immediate re-triggering
-    this.lastFeedbackTime = 0;
+    // Reset state to prevent any pending speech
+    this.lastFeedbackTime = Date.now();
     
-    console.log('🔇 Voice feedback stopped');
+    console.log('Voice feedback stopped');
   }
 
   public pause() {

@@ -27,6 +27,11 @@ function App() {
   const [appState, setAppState] = useState<AppState>(initialState)
 
   const navigateToScreen = (screen: AppScreen) => {
+    // Stop any ongoing speech when navigating between screens
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    
     setAppState(prev => ({ ...prev, currentScreen: screen }))
   }
 

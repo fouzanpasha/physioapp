@@ -35,7 +35,6 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
   const [geminiVoiceEnabled, setGeminiVoiceEnabled] = useState(true); // New state for Gemini voice
   const [geminiApiKey, setGeminiApiKey] = useState('AIzaSyBWXLZirnMBowVOMDBezhptKHfIAanGs58'); // State for API key
   const [showApiKeyInput, setShowApiKeyInput] = useState(false); // Toggle API key input visibility
-  const [instructionsPlayed, setInstructionsPlayed] = useState(false); // Track if instructions were already played
   
   // State machine for rep tracking
   const [stateMachine, setStateMachine] = useState<RepetitionStateMachine | null>(null);
@@ -54,6 +53,9 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
   const { recordingState, startRecording, stopRecording, recordFrame, saveTemplate } = useExerciseRecording();
 
   // Load template and initialize state machine on component mount
+  // Track if instructions have been provided to prevent repetition
+  const [instructionsProvided, setInstructionsProvided] = useState(false);
+
   useEffect(() => {
     // Load saved API key
     const savedApiKey = localStorage.getItem('geminiApiKey');
@@ -100,11 +102,11 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
         });
         setVoiceFeedback(newVoiceFeedback);
         
-        // Provide exercise instructions only once after a short delay
-        if (!instructionsPlayed) {
+        // Only provide instructions once when component first loads
+        if (!instructionsProvided) {
           setTimeout(() => {
             newVoiceFeedback.provideExerciseInstructions(exercise.name);
-            setInstructionsPlayed(true);
+            setInstructionsProvided(true);
           }, 1000);
         }
       } else {
@@ -113,41 +115,20 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
     };
     
     loadTemplate();
-  }, [exercise.name, voiceFeedbackEnabled, geminiVoiceEnabled, geminiApiKey]);
+  }, [exercise.name, voiceFeedbackEnabled, geminiVoiceEnabled, geminiApiKey, instructionsProvided]);
 
   // Reset instructions flag when exercise changes
   useEffect(() => {
-    setInstructionsPlayed(false);
-  }, [exercise.name]);
+    setInstructionsProvided(false);
+  }, [exercise.id]);
 
-  // Cleanup voice feedback when component unmounts or user navigates away
+  // Cleanup effect to stop voice when component unmounts or when navigating away
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.hidden && voiceFeedback) {
-        console.log('🔇 Page hidden, stopping voice feedback');
-        voiceFeedback.stop();
-      }
-    };
-
-    const handleBeforeUnload = () => {
-      if (voiceFeedback) {
-        console.log('🔇 Page unloading, stopping voice feedback');
-        voiceFeedback.stop();
-      }
-    };
-
-    // Add event listeners
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
-    // Cleanup function
     return () => {
+      // Stop voice feedback when component unmounts
       if (voiceFeedback) {
-        console.log('🔇 Component unmounting, stopping voice feedback');
         voiceFeedback.stop();
       }
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [voiceFeedback]);
 
