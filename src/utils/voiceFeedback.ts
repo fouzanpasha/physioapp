@@ -1,13 +1,9 @@
-import { GeminiVoiceSystem } from './geminiVoice';
-
 export interface VoiceFeedbackConfig {
   enabled: boolean;
   volume: number;
   rate: number;
   pitch: number;
   voiceType: 'male' | 'female' | 'neutral';
-  useGeminiVoice?: boolean; // New flag for Gemini voice
-  geminiApiKey?: string; // API key for Gemini
 }
 
 export class VoiceFeedbackSystem {
@@ -15,29 +11,19 @@ export class VoiceFeedbackSystem {
   private currentUtterance: SpeechSynthesisUtterance | null = null;
   private config: VoiceFeedbackConfig;
   private lastFeedbackTime: number = 0;
-  private feedbackCooldown: number = 8000; // Increased to 8 seconds to reduce spam
+  private feedbackCooldown: number = 3000; // 3 seconds between rep counts
   private repCount: number = 0;
   private lastRepCount: number = 0;
-  private consecutiveFormIssues: number = 0; // Track consecutive form issues
-  private lastFormAccuracy: number = 100; // Track previous accuracy
-  private sessionStartTime: number = Date.now();
-  private lastPhase: string = 'rest'; // Track exercise phase
-  private geminiVoice: GeminiVoiceSystem; // Gemini voice system
 
   constructor(config: VoiceFeedbackConfig = {
     enabled: true,
-    volume: 0.7, // Reduced volume
-    rate: 0.85, // Slightly slower for clarity
+    volume: 0.8,
+    rate: 0.9,
     pitch: 1.0,
-    voiceType: 'neutral',
-    useGeminiVoice: true // Default to Gemini voice
+    voiceType: 'neutral'
   }) {
     this.speechSynthesis = window.speechSynthesis;
     this.config = config;
-    this.geminiVoice = new GeminiVoiceSystem({
-      enabled: config.useGeminiVoice || false,
-      apiKey: config.geminiApiKey
-    });
     this.initializeVoice();
   }
 
@@ -89,84 +75,22 @@ export class VoiceFeedbackSystem {
       return; // Still in cooldown
     }
 
-    // Get current exercise phase
-    const currentPhase = formAnalysis?.phase || 'rest';
-    
-    // Don't provide feedback if user is in neutral/rest position (unless it's a rep completion)
-    if (currentPhase === 'rest' && currentRep <= this.lastRepCount) {
-      this.lastPhase = currentPhase;
-      return; // Stay quiet in neutral position
-    }
-
-    let feedbackMessage = '';
-
-    // ONLY speak on rep completion - much simpler and less annoying
+    // Simple rep counter - only speak when rep count increases
     if (currentRep > this.lastRepCount) {
-      feedbackMessage = this.getRepCompletionFeedback(currentRep, stateMachineResult);
+      const feedbackMessage = this.getRepCompletionFeedback(currentRep, stateMachineResult);
       this.lastRepCount = currentRep;
-      this.consecutiveFormIssues = 0; // Reset form issues on good rep
       console.log('Voice: Rep completion feedback');
-    }
-    // Only give form feedback if accuracy is very poor and we haven't spoken recently
-    else if (formAnalysis && formAnalysis.accuracy !== undefined && 
-             formAnalysis.accuracy < 15 && // Much lower threshold
-             this.consecutiveFormIssues >= 5 && // Much higher threshold
-             currentPhase !== 'rest' &&
-             currentTime - this.lastFeedbackTime > 20000) { // 20 second minimum between form feedback
-      feedbackMessage = this.getIntelligentFormCorrectionFeedback(formAnalysis);
-      this.consecutiveFormIssues++;
-      console.log('Voice: Form correction feedback (rare)');
-    }
-
-    // Update form tracking
-    if (formAnalysis && formAnalysis.accuracy !== undefined) {
-      if (formAnalysis.accuracy < 20) {
-        this.consecutiveFormIssues++;
-      } else {
-        this.consecutiveFormIssues = Math.max(0, this.consecutiveFormIssues - 1);
-      }
-      this.lastFormAccuracy = formAnalysis.accuracy;
-    }
-
-    // Update phase tracking
-    this.lastPhase = currentPhase;
-
-    if (feedbackMessage) {
-      console.log('🎤 Voice feedback triggered:', feedbackMessage);
       this.speak(feedbackMessage);
       this.lastFeedbackTime = currentTime;
     }
   }
 
   private getRepCompletionFeedback(repCount: number, stateMachineResult: any): string {
-    const quality = stateMachineResult?.repQuality || 'good';
-    const sessionProgress = repCount / 10; // Assuming 10 reps total
-    
-    switch (quality) {
-      case 'excellent':
-        if (repCount === 10) {
-          return `Perfect! You've completed all 10 reps with excellent form. Great job!`;
-        } else if (repCount >= 7) {
-          return `Outstanding! Rep ${repCount} was perfect. You're almost done!`;
-        } else {
-          return `Excellent form on rep ${repCount}! Keep that precision going.`;
-        }
-      case 'good':
-        if (repCount === 10) {
-          return `Great work! All 10 reps completed. Your form improved throughout the session.`;
-        } else if (repCount >= 7) {
-          return `Good rep ${repCount}! You're in the final stretch.`;
-        } else {
-          return `Solid rep ${repCount}. Good form!`;
-        }
-      case 'poor':
-        if (repCount === 10) {
-          return `Rep ${repCount} completed. Focus on form for your next session.`;
-        } else {
-          return `Rep ${repCount} done. Try to move more smoothly on the next one.`;
-        }
-      default:
-        return `Rep ${repCount} completed!`;
+    // Simple rep counter - just count the reps
+    if (repCount === 10) {
+      return `Rep ${repCount}. Great job!`;
+    } else {
+      return `Rep ${repCount}`;
     }
   }
 
@@ -319,13 +243,7 @@ export class VoiceFeedbackSystem {
       this.speechSynthesis.cancel();
     }
 
-    // Use Gemini voice if enabled and available
-    if (this.config.useGeminiVoice && this.geminiVoice.isEnabled()) {
-      this.geminiVoice.speak(text);
-      return;
-    }
-
-    // Fallback to regular TTS
+    // Use regular TTS
     this.currentUtterance = new SpeechSynthesisUtterance(text);
     this.currentUtterance.volume = this.config.volume;
     this.currentUtterance.rate = this.config.rate;
@@ -345,13 +263,11 @@ export class VoiceFeedbackSystem {
 
   public stop() {
     this.speechSynthesis.cancel();
-    this.geminiVoice.stop();
     this.currentUtterance = null;
   }
 
   public pause() {
     this.speechSynthesis.pause();
-    this.geminiVoice.stop();
   }
 
   public resume() {
@@ -369,13 +285,5 @@ export class VoiceFeedbackSystem {
     }
   }
 
-  public setGeminiApiKey(apiKey: string) {
-    this.config.geminiApiKey = apiKey;
-    this.geminiVoice.setApiKey(apiKey);
-  }
 
-  public enableGeminiVoice(enabled: boolean) {
-    this.config.useGeminiVoice = enabled;
-    this.geminiVoice.updateConfig({ enabled });
-  }
 } 
