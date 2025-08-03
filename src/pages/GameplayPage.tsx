@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { KinetiPlayCanvas } from '../components/KinetiPlayCanvas';
 import { analyzeForm, FormAnalysisResult, ExerciseTemplate as FormTemplate, detectRepetition } from '../utils/formAnalysis';
 import { RepetitionStateMachine, StateMachineResult } from '../utils/stateMachineAnalysis';
+import { VoiceFeedbackSystem } from '../utils/voiceFeedback';
 import { useExerciseRecording } from '../hooks/useExerciseRecording';
 
 // TypeScript declaration for global MediaPipe
@@ -30,10 +31,14 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
   const [countdown, setCountdown] = useState(3);
   const [debugMode, setDebugMode] = useState(false);
   const [useStateMachine, setUseStateMachine] = useState(true); // Toggle between state machine and old system
+  const [voiceFeedbackEnabled, setVoiceFeedbackEnabled] = useState(true);
   
   // State machine for rep tracking
   const [stateMachine, setStateMachine] = useState<RepetitionStateMachine | null>(null);
   const [stateMachineResult, setStateMachineResult] = useState<StateMachineResult | null>(null);
+  
+  // Voice feedback system
+  const [voiceFeedback, setVoiceFeedback] = useState<VoiceFeedbackSystem | null>(null);
   const [repQuality, setRepQuality] = useState<'poor' | 'good' | 'excellent'>('poor');
   const [activeArm, setActiveArm] = useState<'left' | 'right' | 'both'>('right');
   const [lastRepTime, setLastRepTime] = useState<number>(0);
@@ -55,8 +60,23 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
       const newStateMachine = new RepetitionStateMachine(exerciseTemplate);
       setStateMachine(newStateMachine);
       console.log('State Machine initialized for exercise:', exercise.name);
+      
+      // Initialize voice feedback
+      const newVoiceFeedback = new VoiceFeedbackSystem({
+        enabled: voiceFeedbackEnabled,
+        volume: 0.8,
+        rate: 0.9,
+        pitch: 1.0,
+        voiceType: 'neutral'
+      });
+      setVoiceFeedback(newVoiceFeedback);
+      
+      // Provide exercise instructions after a short delay
+      setTimeout(() => {
+        newVoiceFeedback.provideExerciseInstructions(exercise.name);
+      }, 1000);
     }
-  }, [exercise.name]);
+  }, [exercise.name, voiceFeedbackEnabled]);
 
   // Update score based on current form analysis
   const updateScore = useCallback((analysis: FormAnalysisResult) => {
@@ -112,6 +132,11 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
           
           frameIndexRef.current = boundedFrameIndex;
         }
+        
+        // Provide voice feedback
+        if (voiceFeedback) {
+          voiceFeedback.provideFeedback(result, currentFormAnalysis, result.repCount, score);
+        }
       } catch (error) {
         console.error('Error in state machine analysis:', error);
       }
@@ -157,12 +182,17 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
           }
           
           frameIndexRef.current = boundedFrameIndex;
+          
+          // Provide voice feedback for legacy system
+          if (voiceFeedback) {
+            voiceFeedback.provideFeedback(null, analysis, currentRep, score);
+          }
         } catch (error) {
           console.error('Error in legacy form analysis:', error);
         }
       }
     }
-  }, [useStateMachine, stateMachine, template, updateScore, recordingState.isRecording, recordFrame, sessionStartTime, currentRep]);
+  }, [useStateMachine, stateMachine, template, updateScore, recordingState.isRecording, recordFrame, sessionStartTime, currentRep, voiceFeedback]);
 
   // Start form analysis when MediaPipe is ready
   useEffect(() => {
@@ -204,6 +234,18 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
       completedReps: currentRep,
       targetReps: 10
     };
+    
+    // Provide session completion voice feedback
+    if (voiceFeedback) {
+      const sessionDuration = Date.now() - sessionStartTime;
+      voiceFeedback.provideSessionFeedback({
+        totalReps: currentRep,
+        averageAccuracy: calculateAccuracy(),
+        totalScore: score,
+        sessionDuration: sessionDuration
+      });
+    }
+    
     onGameComplete(session);
   };
 
@@ -296,6 +338,21 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
               }`}
             >
               {useStateMachine ? 'State Machine' : 'Legacy System'}
+            </button>
+            <button 
+              onClick={() => {
+                setVoiceFeedbackEnabled(!voiceFeedbackEnabled);
+                if (voiceFeedback) {
+                  voiceFeedback.toggle();
+                }
+              }}
+              className={`text-sm px-2 py-1 rounded ${
+                voiceFeedbackEnabled 
+                  ? 'bg-purple-500 text-white' 
+                  : 'bg-gray-500 text-white'
+              }`}
+            >
+              {voiceFeedbackEnabled ? 'Voice On' : 'Voice Off'}
             </button>
           </div>
         </div>
