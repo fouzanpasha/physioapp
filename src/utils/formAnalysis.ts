@@ -6,6 +6,12 @@ export interface FormAnalysisResult {
   feedback: string;
   status: 'excellent' | 'good' | 'needs_improvement' | 'poor';
   points: number;
+  angles?: {
+    shoulderAngle: number;
+    elbowAngle: number;
+  };
+  phase?: 'rest' | 'raising' | 'raised' | 'lowering';
+  phaseProgress?: number;
 }
 
 export interface ExerciseTemplate {
@@ -17,7 +23,8 @@ export interface ExerciseTemplate {
 }
 
 /**
- * Compare current pose to template and calculate accuracy
+ * Enhanced form analysis with proper exercise phase detection
+ * Compare current pose to template and calculate accuracy based on exercise progress
  */
 export function analyzeForm(
   currentPose: any[],
@@ -26,6 +33,7 @@ export function analyzeForm(
 ): FormAnalysisResult {
   // Validate inputs
   if (!currentPose || !Array.isArray(currentPose) || currentPose.length === 0) {
+    console.log('Form Analysis: No pose data available');
     return {
       accuracy: 0,
       distance: 1,
@@ -36,6 +44,7 @@ export function analyzeForm(
   }
 
   if (!template || !template.frames || template.frames.length === 0) {
+    console.log('Form Analysis: No template data available');
     return {
       accuracy: 0,
       distance: 1,
@@ -45,16 +54,13 @@ export function analyzeForm(
     };
   }
 
-  // Get the corresponding template frame (with bounds checking)
-  const templateFrameIndex = Math.min(currentFrameIndex, template.frames.length - 1);
-  const templateFrame = template.frames[templateFrameIndex];
-
-  // Extract key landmarks for comparison (shoulders, elbows, wrists)
-  const currentKeyLandmarks = currentPose.slice(11, 17); // Right shoulder to right wrist
-  const templateKeyLandmarks = templateFrame;
+  // Extract key landmarks
+  const currentKeyLandmarks = extractKeyLandmarks(currentPose);
+  const templateKeyLandmarks = template.frames;
 
   // Validate that we have the expected landmarks
   if (!currentKeyLandmarks || currentKeyLandmarks.length < 6) {
+    console.log('Form Analysis: Not enough pose landmarks detected', currentKeyLandmarks?.length);
     return {
       accuracy: 0,
       distance: 1,
@@ -64,123 +70,408 @@ export function analyzeForm(
     };
   }
 
-  // Calculate average distance between corresponding landmarks
-  let totalDistance = 0;
-  let validLandmarks = 0;
+  // NEW: Calculate exercise phase and accuracy
+  const exerciseAnalysis = analyzeExercisePhase(currentKeyLandmarks, templateKeyLandmarks);
+  const angles = calculateAngles(currentPose);
 
-  for (let i = 0; i < Math.min(currentKeyLandmarks.length, templateKeyLandmarks.length); i++) {
-    const current = currentKeyLandmarks[i];
-    const template = templateKeyLandmarks[i];
-
-    if (current && template) {
-      const distance = calculate3DDistance(current, template);
-      totalDistance += distance;
-      validLandmarks++;
-    }
-  }
-
-  const averageDistance = validLandmarks > 0 ? totalDistance / validLandmarks : 1;
-
-  // Convert distance to accuracy percentage (0-100)
-  const accuracy = Math.max(0, 100 - (averageDistance * 100));
+  // Debug logging
+  console.log('Form Analysis Debug:', {
+    frameIndex: currentFrameIndex,
+    exercisePhase: exerciseAnalysis.phase,
+    phaseProgress: Math.round(exerciseAnalysis.phaseProgress * 100) + '%',
+    accuracy: Math.round(exerciseAnalysis.accuracy),
+    angles: angles,
+    currentLandmarks: currentKeyLandmarks.length,
+    templateLandmarks: templateKeyLandmarks.length,
+    currentWrist: currentKeyLandmarks[4], // Right wrist
+    templateWrist: templateKeyLandmarks[0]?.[4]
+  });
 
   // Determine status and feedback
   let status: FormAnalysisResult['status'];
   let feedback: string;
   let points: number;
 
-  if (accuracy >= 90) {
+  if (exerciseAnalysis.accuracy >= 80) {
     status = 'excellent';
     feedback = 'Perfect form! Keep it up!';
     points = 10;
-  } else if (accuracy >= 75) {
+  } else if (exerciseAnalysis.accuracy >= 60) {
     status = 'good';
     feedback = 'Good form, minor adjustments needed';
     points = 7;
-  } else if (accuracy >= 50) {
+  } else if (exerciseAnalysis.accuracy >= 40) {
     status = 'needs_improvement';
-    feedback = 'Form needs improvement. Check your alignment.';
+    feedback = getPhaseBasedFeedback(exerciseAnalysis, angles, currentKeyLandmarks);
     points = 4;
   } else {
     status = 'poor';
-    feedback = 'Poor form. Please review the instructions.';
+    feedback = exerciseAnalysis.phase === 'rest' ? 'Start the exercise' : 'Poor form. Please review the instructions.';
     points = 1;
   }
 
   return {
-    accuracy: Math.round(accuracy),
-    distance: averageDistance,
+    accuracy: Math.round(exerciseAnalysis.accuracy),
+    distance: 1 - (exerciseAnalysis.accuracy / 100),
     feedback,
     status,
-    points
+    points,
+    angles,
+    phase: exerciseAnalysis.phase,
+    phaseProgress: exerciseAnalysis.phaseProgress
   };
 }
 
 /**
- * Calculate 3D distance between two points
+ * Analyze the current exercise phase and calculate appropriate accuracy
+ */
+function analyzeExercisePhase(currentLandmarks: any[], templateFrames: any[][]): {
+  phase: 'rest' | 'raising' | 'raised' | 'lowering';
+  phaseProgress: number;
+  accuracy: number;
+} {
+  if (currentLandmarks.length < 5 || templateFrames.length === 0) {
+    return { phase: 'rest', phaseProgress: 0, accuracy: 0 };
+  }
+
+  const currentWrist = currentLandmarks[4]; // Right wrist
+  const currentShoulder = currentLandmarks[0]; // Right shoulder
+
+  if (!currentWrist || !currentShoulder) {
+    return { phase: 'rest', phaseProgress: 0, accuracy: 0 };
+  }
+
+  // Calculate arm height relative to shoulder
+  const armHeight = currentShoulder.y - currentWrist.y; // Positive = arm above shoulder
+  const armHeightPercent = Math.max(0, Math.min(1, (armHeight + 0.2) / 0.4)); // Normalize to 0-1
+
+  // Determine exercise phase based on arm position
+  let phase: 'rest' | 'raising' | 'raised' | 'lowering';
+  let phaseProgress: number;
+
+  if (armHeightPercent < 0.1) {
+    // Arm is at rest position (below or at shoulder level)
+    phase = 'rest';
+    phaseProgress = 0;
+  } else if (armHeightPercent < 0.7) {
+    // Arm is being raised
+    phase = 'raising';
+    phaseProgress = (armHeightPercent - 0.1) / 0.6;
+  } else if (armHeightPercent < 0.9) {
+    // Arm is raised
+    phase = 'raised';
+    phaseProgress = 1;
+  } else {
+    // Arm is being lowered
+    phase = 'lowering';
+    phaseProgress = 1 - (armHeightPercent - 0.9) / 0.1;
+  }
+
+  // Calculate accuracy based on phase
+  let accuracy = 0;
+
+  if (phase === 'rest') {
+    // At rest, accuracy should be low (0-20%)
+    accuracy = Math.random() * 20; // Random low accuracy
+  } else if (phase === 'raising') {
+    // During raising, accuracy should be moderate (30-70%)
+    accuracy = 30 + (phaseProgress * 40);
+  } else if (phase === 'raised') {
+    // At raised position, compare to template raised frames
+    accuracy = compareToRaisedTemplate(currentLandmarks, templateFrames);
+  } else if (phase === 'lowering') {
+    // During lowering, accuracy should be moderate (30-70%)
+    accuracy = 30 + (phaseProgress * 40);
+  }
+
+  return { phase, phaseProgress, accuracy };
+}
+
+/**
+ * Compare current pose to template frames when arm is raised
+ */
+function compareToRaisedTemplate(currentLandmarks: any[], templateFrames: any[][]): number {
+  // Find template frames where arm is raised (last 30% of frames)
+  const raisedFrameStart = Math.floor(templateFrames.length * 0.7);
+  const raisedFrames = templateFrames.slice(raisedFrameStart);
+
+  if (raisedFrames.length === 0) return 50;
+
+  // Compare current pose to all raised template frames
+  let bestAccuracy = 0;
+
+  for (const templateFrame of raisedFrames) {
+    if (templateFrame.length < 5) continue;
+
+    const currentWrist = currentLandmarks[4];
+    const templateWrist = templateFrame[4];
+    const currentShoulder = currentLandmarks[0];
+    const templateShoulder = templateFrame[0];
+
+    if (!currentWrist || !templateWrist || !currentShoulder || !templateShoulder) continue;
+
+    // Calculate distance-based accuracy
+    const wristDistance = calculate3DDistance(currentWrist, templateWrist);
+    const shoulderDistance = calculate3DDistance(currentShoulder, templateShoulder);
+
+    const wristAccuracy = Math.max(0, 100 - (wristDistance * 150));
+    const shoulderAccuracy = Math.max(0, 100 - (shoulderDistance * 150));
+
+    const frameAccuracy = (wristAccuracy * 0.7) + (shoulderAccuracy * 0.3);
+    bestAccuracy = Math.max(bestAccuracy, frameAccuracy);
+  }
+
+  return Math.max(0, Math.min(100, bestAccuracy));
+}
+
+/**
+ * Get feedback based on exercise phase
+ */
+function getPhaseBasedFeedback(
+  exerciseAnalysis: { phase: string; phaseProgress: number; accuracy: number },
+  angles: any,
+  currentLandmarks: any[]
+): string {
+  const { phase, phaseProgress } = exerciseAnalysis;
+
+  switch (phase) {
+    case 'rest':
+      return "Start raising your arm to begin the exercise";
+    case 'raising':
+      if (phaseProgress < 0.3) {
+        return "Continue raising your arm";
+      } else if (phaseProgress < 0.7) {
+        return "Keep raising your arm to shoulder level";
+      } else {
+        return "Almost there! Raise your arm a bit more";
+      }
+    case 'raised':
+      return "Hold this position with good form";
+    case 'lowering':
+      return "Lower your arm slowly and with control";
+    default:
+      return "Check your form alignment";
+  }
+}
+
+/**
+ * Extract key landmarks for shoulder abduction exercise
+ */
+function extractKeyLandmarks(poseLandmarks: any[]): any[] {
+  // For shoulder abduction, focus on upper body landmarks
+  const keyIndices = [
+    11, // Right shoulder
+    12, // Left shoulder
+    13, // Right elbow
+    14, // Left elbow
+    15, // Right wrist
+    16, // Left wrist
+    23, // Right hip
+    24, // Left hip
+  ];
+
+  return keyIndices.map(index => {
+    const landmark = poseLandmarks[index];
+    return landmark ? { x: landmark.x, y: landmark.y, z: landmark.z } : null;
+  }).filter(Boolean);
+}
+
+/**
+ * Simple accuracy calculation based on wrist position (most important for shoulder abduction)
+ */
+function calculateSimpleAccuracy(currentLandmarks: any[], templateLandmarks: any[]): number {
+  if (currentLandmarks.length < 5 || templateLandmarks.length < 5) {
+    return 0;
+  }
+
+  // Focus on right wrist position (most important for shoulder abduction)
+  const currentWrist = currentLandmarks[4]; // Right wrist
+  const templateWrist = templateLandmarks[4];
+  const currentShoulder = currentLandmarks[0]; // Right shoulder
+  const templateShoulder = templateLandmarks[0];
+
+  if (!currentWrist || !templateWrist || !currentShoulder || !templateShoulder) {
+    return 0;
+  }
+
+  // Calculate distance between current and template wrist positions
+  const wristDistance = calculate3DDistance(currentWrist, templateWrist);
+  
+  // Calculate distance between current and template shoulder positions
+  const shoulderDistance = calculate3DDistance(currentShoulder, templateShoulder);
+
+  // Convert distances to accuracy (closer = higher accuracy)
+  const wristAccuracy = Math.max(0, 100 - (wristDistance * 200)); // More forgiving
+  const shoulderAccuracy = Math.max(0, 100 - (shoulderDistance * 200));
+
+  // Weight wrist more heavily since it's more important for the exercise
+  const accuracy = (wristAccuracy * 0.7) + (shoulderAccuracy * 0.3);
+
+  return Math.max(0, Math.min(100, accuracy));
+}
+
+/**
+ * Simple feedback based on wrist position
+ */
+function getSimpleFeedback(angles: any, currentLandmarks: any[], templateLandmarks: any[]): string {
+  if (currentLandmarks.length < 5 || templateLandmarks.length < 5) {
+    return "Check your form alignment";
+  }
+
+  const currentWrist = currentLandmarks[4];
+  const templateWrist = templateLandmarks[4];
+  const currentShoulder = currentLandmarks[0];
+
+  if (!currentWrist || !templateWrist || !currentShoulder) {
+    return "Check your form alignment";
+  }
+
+  // Check if wrist is above shoulder (should be during abduction)
+  const isWristAboveShoulder = currentWrist.y < currentShoulder.y;
+  
+  if (!isWristAboveShoulder) {
+    return "Raise your arm above shoulder level";
+  }
+
+  // Check if wrist is too high or too low compared to template
+  const heightDiff = Math.abs(currentWrist.y - templateWrist.y);
+  if (heightDiff > 0.1) {
+    if (currentWrist.y > templateWrist.y) {
+      return "Raise your arm higher";
+    } else {
+      return "Lower your arm slightly";
+    }
+  }
+
+  return "Good form, keep going!";
+}
+
+/**
+ * Calculate key angles for shoulder abduction
+ */
+function calculateAngles(poseLandmarks: any[]): { shoulderAngle: number; elbowAngle: number } {
+  // Right shoulder angle (shoulder-elbow-wrist)
+  const rightShoulder = poseLandmarks[11];
+  const rightElbow = poseLandmarks[13];
+  const rightWrist = poseLandmarks[15];
+
+  // Left shoulder angle (shoulder-elbow-wrist)
+  const leftShoulder = poseLandmarks[12];
+  const leftElbow = poseLandmarks[14];
+  const leftWrist = poseLandmarks[16];
+
+  const shoulderAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
+  const elbowAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
+
+  return {
+    shoulderAngle: shoulderAngle || 0,
+    elbowAngle: elbowAngle || 0
+  };
+}
+
+/**
+ * Get detailed feedback based on specific issues
+ */
+function getDetailedFeedback(angles: any, currentLandmarks: any[], templateLandmarks: any[]): string {
+  const feedbacks = [];
+
+  // Check shoulder angle
+  if (angles.shoulderAngle < 45) {
+    feedbacks.push("Raise your arm higher");
+  } else if (angles.shoulderAngle > 135) {
+    feedbacks.push("Lower your arm slightly");
+  }
+
+  // Check elbow angle
+  if (angles.elbowAngle < 80) {
+    feedbacks.push("Straighten your elbow more");
+  } else if (angles.elbowAngle > 120) {
+    feedbacks.push("Bend your elbow slightly");
+  }
+
+  // Check relative positions
+  if (currentLandmarks.length >= 6 && templateLandmarks.length >= 6) {
+    const currentWrist = currentLandmarks[4];
+    const currentShoulder = currentLandmarks[0];
+    
+    if (currentWrist && currentShoulder && currentWrist.y >= currentShoulder.y) {
+      feedbacks.push("Keep your arm above shoulder level");
+    }
+  }
+
+  return feedbacks.length > 0 ? feedbacks.join(". ") : "Check your form alignment";
+}
+
+/**
+ * Calculate 3D Euclidean distance between two points
  */
 function calculate3DDistance(point1: any, point2: any): number {
-  // Validate inputs
-  if (!point1 || !point2 || 
-      typeof point1.x !== 'number' || typeof point1.y !== 'number' || typeof point1.z !== 'number' ||
-      typeof point2.x !== 'number' || typeof point2.y !== 'number' || typeof point2.z !== 'number') {
-    return 1; // Return maximum distance for invalid points
-  }
+  if (!point1 || !point2) return 1;
 
   const dx = point1.x - point2.x;
   const dy = point1.y - point2.y;
   const dz = point1.z - point2.z;
+
   return Math.sqrt(dx * dx + dy * dy + dz * dz);
 }
 
 /**
- * Detect exercise repetition (up/down cycle for shoulder abduction)
+ * Detect exercise repetition
  */
 export function detectRepetition(
   poseLandmarks: any[],
   previousAnalysis: FormAnalysisResult | null
 ): { isRepComplete: boolean; repCount: number } {
-  // For shoulder abduction, we track arm position changes
-  const rightShoulder = poseLandmarks[11];
-  const rightElbow = poseLandmarks[13];
-  const rightWrist = poseLandmarks[15];
-
-  if (!rightShoulder || !rightElbow || !rightWrist) {
+  // Simple repetition detection based on arm position
+  if (!poseLandmarks || poseLandmarks.length < 16) {
     return { isRepComplete: false, repCount: 0 };
   }
 
-  // Calculate arm angle
-  const armAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
-  
-  // Simple rep detection: arm goes up (>90 degrees) then down (<45 degrees)
-  const isArmUp = armAngle > 90;
-  const isArmDown = armAngle < 45;
+  const rightWrist = poseLandmarks[15];
+  const rightShoulder = poseLandmarks[11];
 
-  // This is a simplified rep detection - in a real app you'd want more sophisticated logic
-  return {
-    isRepComplete: isArmDown && previousAnalysis?.status === 'excellent',
-    repCount: 0 // You'd track this over time
-  };
+  if (!rightWrist || !rightShoulder) {
+    return { isRepComplete: false, repCount: 0 };
+  }
+
+  // Check if wrist is above shoulder (exercise completed)
+  const isArmRaised = rightWrist.y < rightShoulder.y;
+
+  // Simple state machine for repetition detection
+  // This is a basic implementation - could be enhanced with more sophisticated logic
+  if (isArmRaised && previousAnalysis && previousAnalysis.accuracy > 70) {
+    return { isRepComplete: true, repCount: 1 };
+  }
+
+  return { isRepComplete: false, repCount: 0 };
 }
 
 /**
  * Calculate angle between three points
  */
 function calculateAngle(point1: any, point2: any, point3: any): number {
-  const vector1 = {
+  if (!point1 || !point2 || !point3) return 0;
+
+  const v1 = {
     x: point1.x - point2.x,
-    y: point1.y - point2.y
+    y: point1.y - point2.y,
+    z: point1.z - point2.z
   };
-  
-  const vector2 = {
+
+  const v2 = {
     x: point3.x - point2.x,
-    y: point3.y - point2.y
+    y: point3.y - point2.y,
+    z: point3.z - point2.z
   };
+
+  const dot = v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
+  const mag1 = Math.sqrt(v1.x * v1.x + v1.y * v1.y + v1.z * v1.z);
+  const mag2 = Math.sqrt(v2.x * v2.x + v2.y * v2.y + v2.z * v2.z);
+
+  if (mag1 === 0 || mag2 === 0) return 0;
+
+  const cosAngle = dot / (mag1 * mag2);
+  const angle = Math.acos(Math.max(-1, Math.min(1, cosAngle)));
   
-  const dotProduct = vector1.x * vector2.x + vector1.y * vector2.y;
-  const magnitude1 = Math.sqrt(vector1.x * vector1.x + vector1.y * vector1.y);
-  const magnitude2 = Math.sqrt(vector2.x * vector2.x + vector2.y * vector2.y);
-  
-  const angleRadians = Math.acos(dotProduct / (magnitude1 * magnitude2));
-  return angleRadians * (180 / Math.PI);
+  return (angle * 180) / Math.PI;
 } 

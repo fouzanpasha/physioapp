@@ -27,6 +27,7 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
   const [isRecordingMode, setIsRecordingMode] = useState(false);
   const [recordingStep, setRecordingStep] = useState<'instructions' | 'recording' | 'saving'>('instructions');
   const [countdown, setCountdown] = useState(3);
+  const [debugMode, setDebugMode] = useState(false);
   
   const frameIndexRef = useRef(0);
   const analysisIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -60,18 +61,24 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
     // Analyze form if template exists
     if (template && template.frames && template.frames.length > 0) {
       try {
-        const analysis = analyzeForm(poseLandmarks, template, frameIndexRef.current);
+        // Use a more sophisticated frame matching strategy
+        const currentTime = Date.now() - sessionStartTime;
+        const templateDuration = template.duration;
+        const frameIndex = Math.floor((currentTime / templateDuration) * template.frames.length);
+        const boundedFrameIndex = Math.min(frameIndex, template.frames.length - 1);
+        
+        const analysis = analyzeForm(poseLandmarks, template, boundedFrameIndex);
         setCurrentFormAnalysis(analysis);
         updateScore(analysis);
         
-        // Increment frame index for next analysis
-        frameIndexRef.current = (frameIndexRef.current + 1) % template.frames.length;
+        // Update frame index for next analysis
+        frameIndexRef.current = boundedFrameIndex;
       } catch (error) {
         console.error('Error analyzing form:', error);
         // Don't crash the app, just skip analysis
       }
     }
-  }, [template, updateScore, recordingState.isRecording, recordFrame]);
+  }, [template, updateScore, recordingState.isRecording, recordFrame, sessionStartTime]);
 
   // Start form analysis when MediaPipe is ready
   useEffect(() => {
@@ -178,6 +185,12 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
             <div>Score: <span className="font-bold text-physio-primary">{score}</span></div>
             <div>Reps: <span className="font-bold">{currentRep}/10</span></div>
             <div>Time: <span className="font-bold">{getElapsedTime()}</span></div>
+            <button 
+              onClick={() => setDebugMode(!debugMode)}
+              className="text-sm bg-gray-500 text-white px-2 py-1 rounded"
+            >
+              {debugMode ? 'Hide Debug' : 'Debug'}
+            </button>
           </div>
         </div>
         
@@ -396,6 +409,32 @@ export default function GameplayPage({ exercise, onGameComplete }: GameplayPageP
                       +{currentFormAnalysis.points}
                     </span>
                   </div>
+                  
+                  {/* Debug Information */}
+                  {debugMode && currentFormAnalysis && (
+                    <div className="mt-4 p-3 bg-gray-100 rounded text-xs">
+                      <div className="font-semibold mb-2">Debug Info:</div>
+                      <div>Shoulder Angle: {Math.round(currentFormAnalysis.angles?.shoulderAngle || 0)}°</div>
+                      <div>Elbow Angle: {Math.round(currentFormAnalysis.angles?.elbowAngle || 0)}°</div>
+                      <div>Distance: {currentFormAnalysis.distance.toFixed(3)}</div>
+                      <div>Frame Index: {frameIndexRef.current}</div>
+                      <div>Template Frames: {template?.frameCount || 0}</div>
+                      <div>Template Duration: {template?.duration || 0}ms</div>
+                      <div>Current Time: {Date.now() - sessionStartTime}ms</div>
+                      <div className="mt-2 font-semibold">Exercise Phase:</div>
+                      <div className="text-xs">
+                        <div>Phase: {currentFormAnalysis.phase || 'unknown'}</div>
+                        <div>Progress: {currentFormAnalysis.phaseProgress || '0%'}</div>
+                      </div>
+                      <div className="mt-2 font-semibold">Template Sample:</div>
+                      {template?.frames && template.frames[0] && (
+                        <div className="text-xs">
+                          <div>Wrist: ({template.frames[0][4]?.x.toFixed(2)}, {template.frames[0][4]?.y.toFixed(2)})</div>
+                          <div>Shoulder: ({template.frames[0][0]?.x.toFixed(2)}, {template.frames[0][0]?.y.toFixed(2)})</div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="text-sm text-gray-500">

@@ -44,22 +44,39 @@ export const useExerciseRecording = () => {
   const recordFrame = useCallback((poseLandmarks: any[]) => {
     if (!recordingState.isRecording) return;
 
-    // Extract key landmarks for shoulder abduction (shoulders, elbows, wrists)
-    const keyLandmarks = poseLandmarks.slice(11, 17); // Right shoulder to right wrist
-    const frameData = keyLandmarks.map(landmark => ({
-      x: landmark.x,
-      y: landmark.y,
-      z: landmark.z
-    }));
+    // Extract comprehensive landmarks for shoulder abduction
+    const keyIndices = [
+      11, // Right shoulder
+      12, // Left shoulder
+      13, // Right elbow
+      14, // Left elbow
+      15, // Right wrist
+      16, // Left wrist
+      23, // Right hip
+      24, // Left hip
+    ];
 
-    setRecordingState(prev => ({
-      ...prev,
-      recordedFrames: [...prev.recordedFrames, frameData],
-      duration: prev.startTime ? Date.now() - prev.startTime : 0
-    }));
+    const frameData = keyIndices.map(index => {
+      const landmark = poseLandmarks[index];
+      return landmark ? { x: landmark.x, y: landmark.y, z: landmark.z } : null;
+    }).filter(Boolean);
+
+    // Only record if we have enough landmarks
+    if (frameData.length >= 6) {
+      setRecordingState(prev => ({
+        ...prev,
+        recordedFrames: [...prev.recordedFrames, frameData],
+        duration: prev.startTime ? Date.now() - prev.startTime : 0
+      }));
+    }
   }, [recordingState.isRecording]);
 
   const saveTemplate = useCallback((exerciseName: string) => {
+    // Validate that we have enough frames
+    if (recordingState.recordedFrames.length < 10) {
+      console.warn('Template too short, recording more frames for better accuracy');
+    }
+
     const template = {
       name: exerciseName,
       frames: recordingState.recordedFrames,
@@ -68,11 +85,18 @@ export const useExerciseRecording = () => {
       createdAt: new Date().toISOString()
     };
 
+    // Validate template before saving
+    if (template.frameCount === 0) {
+      console.error('Cannot save empty template');
+      return null;
+    }
+
     // Save to localStorage (in a real app, this would be sent to a server)
     const existingTemplates = JSON.parse(localStorage.getItem('exerciseTemplates') || '{}');
     existingTemplates[exerciseName] = template;
     localStorage.setItem('exerciseTemplates', JSON.stringify(existingTemplates));
 
+    console.log(`Template saved: ${template.frameCount} frames, ${template.duration}ms duration`);
     return template;
   }, [recordingState]);
 
