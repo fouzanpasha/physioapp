@@ -11,14 +11,17 @@ export class VoiceFeedbackSystem {
   private currentUtterance: SpeechSynthesisUtterance | null = null;
   private config: VoiceFeedbackConfig;
   private lastFeedbackTime: number = 0;
-  private feedbackCooldown: number = 5000; // 5 seconds between feedback to reduce spam
+  private feedbackCooldown: number = 8000; // Increased to 8 seconds to reduce spam
   private repCount: number = 0;
   private lastRepCount: number = 0;
+  private consecutiveFormIssues: number = 0; // Track consecutive form issues
+  private lastFormAccuracy: number = 100; // Track previous accuracy
+  private sessionStartTime: number = Date.now();
 
   constructor(config: VoiceFeedbackConfig = {
     enabled: true,
-    volume: 0.8,
-    rate: 0.9,
+    volume: 0.7, // Reduced volume
+    rate: 0.85, // Slightly slower for clarity
     pitch: 1.0,
     voiceType: 'neutral'
   }) {
@@ -81,24 +84,40 @@ export class VoiceFeedbackSystem {
     if (currentRep > this.lastRepCount) {
       feedbackMessage = this.getRepCompletionFeedback(currentRep, stateMachineResult);
       this.lastRepCount = currentRep;
+      this.consecutiveFormIssues = 0; // Reset form issues on good rep
       console.log('Voice: Rep completion feedback');
     }
-    // Check for state changes (only if not a rep completion)
+    // Check for significant state changes (only if not a rep completion)
     else if (stateMachineResult?.debugInfo?.stateChange && 
              !stateMachineResult.debugInfo.stateChange.includes('REP COMPLETE')) {
       feedbackMessage = this.getStateChangeFeedback(stateMachineResult);
       console.log('Voice: State change feedback');
     }
-    // Check for form issues (only if accuracy is very low and we have form data)
-    else if (formAnalysis && formAnalysis.accuracy !== undefined && formAnalysis.accuracy < 30) {
-      feedbackMessage = this.getFormCorrectionFeedback(formAnalysis);
-      console.log('Voice: Form correction feedback');
+    // Check for persistent form issues (only if accuracy is very low and getting worse)
+    else if (formAnalysis && formAnalysis.accuracy !== undefined && 
+             formAnalysis.accuracy < 25 && 
+             formAnalysis.accuracy < this.lastFormAccuracy &&
+             this.consecutiveFormIssues >= 2) {
+      feedbackMessage = this.getIntelligentFormCorrectionFeedback(formAnalysis);
+      this.consecutiveFormIssues++;
+      console.log('Voice: Intelligent form correction feedback');
     }
-    // Provide encouragement for good form (only occasionally and with higher threshold)
-    else if (formAnalysis && formAnalysis.accuracy !== undefined && formAnalysis.accuracy > 90 && 
-             Math.random() < 0.2) { // 20% chance to avoid spam
+    // Provide encouragement for excellent form (only occasionally and with very high threshold)
+    else if (formAnalysis && formAnalysis.accuracy !== undefined && 
+             formAnalysis.accuracy > 95 && 
+             Math.random() < 0.1) { // Only 10% chance to avoid spam
       feedbackMessage = this.getEncouragementFeedback(formAnalysis);
       console.log('Voice: Encouragement feedback');
+    }
+
+    // Update form tracking
+    if (formAnalysis && formAnalysis.accuracy !== undefined) {
+      if (formAnalysis.accuracy < 30) {
+        this.consecutiveFormIssues++;
+      } else {
+        this.consecutiveFormIssues = Math.max(0, this.consecutiveFormIssues - 1);
+      }
+      this.lastFormAccuracy = formAnalysis.accuracy;
     }
 
     if (feedbackMessage) {
@@ -110,14 +129,31 @@ export class VoiceFeedbackSystem {
 
   private getRepCompletionFeedback(repCount: number, stateMachineResult: any): string {
     const quality = stateMachineResult?.repQuality || 'good';
+    const sessionProgress = repCount / 10; // Assuming 10 reps total
     
     switch (quality) {
       case 'excellent':
-        return `Excellent! Rep ${repCount} completed with perfect form. Keep it up!`;
+        if (repCount === 10) {
+          return `Perfect! You've completed all 10 reps with excellent form. Great job!`;
+        } else if (repCount >= 7) {
+          return `Outstanding! Rep ${repCount} was perfect. You're almost done!`;
+        } else {
+          return `Excellent form on rep ${repCount}! Keep that precision going.`;
+        }
       case 'good':
-        return `Great job! Rep ${repCount} completed. Good form!`;
+        if (repCount === 10) {
+          return `Great work! All 10 reps completed. Your form improved throughout the session.`;
+        } else if (repCount >= 7) {
+          return `Good rep ${repCount}! You're in the final stretch.`;
+        } else {
+          return `Solid rep ${repCount}. Good form!`;
+        }
       case 'poor':
-        return `Rep ${repCount} completed, but focus on your form. Try to move more smoothly.`;
+        if (repCount === 10) {
+          return `Rep ${repCount} completed. Focus on form for your next session.`;
+        } else {
+          return `Rep ${repCount} done. Try to move more smoothly on the next one.`;
+        }
       default:
         return `Rep ${repCount} completed!`;
     }
@@ -127,43 +163,59 @@ export class VoiceFeedbackSystem {
     const stateChange = stateMachineResult.debugInfo.stateChange;
     
     if (stateChange.includes('Start position reached')) {
-      return 'Good starting position. Now raise your arms smoothly.';
+      return 'Perfect starting position. Now raise your arms smoothly to shoulder level.';
     }
     else if (stateChange.includes('End position reached')) {
-      return 'Great! Hold briefly, then lower back down.';
-    }
-    else if (stateChange.includes('REP COMPLETE')) {
-      return 'Rep completed! Return to starting position for the next rep.';
+      return 'Great! Hold this position briefly, then lower with control.';
     }
     
     return '';
   }
 
-  private getFormCorrectionFeedback(formAnalysis: any): string {
+  private getIntelligentFormCorrectionFeedback(formAnalysis: any): string {
     const accuracy = formAnalysis.accuracy;
+    const phase = formAnalysis.phase || 'unknown';
     const feedback = formAnalysis.feedback || '';
     
-    if (accuracy < 20) {
-      return 'Your form needs work. Stand with arms at your sides, then raise them smoothly to shoulder level.';
+    // Very specific, actionable feedback based on accuracy and phase
+    if (accuracy < 15) {
+      if (phase === 'rest') {
+        return 'I can see you\'re ready to start. Stand with your arms relaxed at your sides, then raise them smoothly out to the sides.';
+      } else if (phase === 'raising') {
+        return 'Your arms are moving, but try to raise them more evenly. Keep both arms at the same height as you lift.';
+      } else if (phase === 'raised') {
+        return 'Your arms are up, but they\'re not quite at shoulder level. Raise them a bit higher - your wrists should be level with your shoulders.';
+      } else {
+        return 'Focus on the movement pattern. Start with arms down, raise to shoulder level, hold briefly, then lower smoothly.';
+      }
     }
-    else if (accuracy < 30) {
-      return 'Focus on raising your arms straight out to the sides, keeping them at shoulder level.';
+    else if (accuracy < 25) {
+      if (phase === 'raising') {
+        return 'Good movement, but try to keep your arms straight as you raise them. Don\'t bend your elbows.';
+      } else if (phase === 'raised') {
+        return 'Almost there! Your arms need to be a bit higher. Your wrists should be at shoulder level, not below.';
+      } else {
+        return 'The movement is there, but try to make it more controlled. Raise and lower your arms more smoothly.';
+      }
     }
     
-    return feedback || 'Try to match the movement pattern more closely.';
+    // If we have specific feedback from form analysis, use it
+    if (feedback && feedback !== 'Check your form alignment') {
+      return feedback;
+    }
+    
+    return 'Try to match the movement pattern more closely. Focus on raising your arms to shoulder level.';
   }
 
   private getEncouragementFeedback(formAnalysis: any): string {
     const accuracy = formAnalysis.accuracy;
+    const repCount = this.lastRepCount;
     
-    if (accuracy > 95) {
-      return 'Outstanding form! You\'re doing this perfectly!';
+    if (accuracy > 98) {
+      return 'Perfect form! You\'re doing this exactly right.';
     }
-    else if (accuracy > 85) {
-      return 'Excellent form! Keep moving smoothly.';
-    }
-    else if (accuracy > 75) {
-      return 'Great form! You\'re on the right track.';
+    else if (accuracy > 95) {
+      return 'Excellent form! Keep up this precision.';
     }
     
     return '';
@@ -178,25 +230,40 @@ export class VoiceFeedbackSystem {
     if (!this.config.enabled) return;
 
     const { totalReps, averageAccuracy, totalScore, sessionDuration } = sessionStats;
+    const sessionTime = Date.now() - this.sessionStartTime;
     
-    let message = `Session complete! You completed ${totalReps} reps `;
+    let message = '';
     
-    if (averageAccuracy > 85) {
-      message += 'with excellent form! ';
-    } else if (averageAccuracy > 70) {
-      message += 'with good form! ';
+    if (totalReps >= 10) {
+      message = 'Congratulations! You\'ve completed all 10 reps. ';
+      
+      if (averageAccuracy > 90) {
+        message += 'Your form was excellent throughout the session. ';
+      } else if (averageAccuracy > 75) {
+        message += 'You showed good form and consistency. ';
+      } else {
+        message += 'You completed the exercise with room for improvement. ';
+      }
     } else {
-      message += 'with room for improvement. ';
+      message = `You completed ${totalReps} reps. `;
+      
+      if (averageAccuracy > 80) {
+        message += 'Your form was very good. ';
+      } else if (averageAccuracy > 60) {
+        message += 'You showed decent form. ';
+      } else {
+        message += 'Focus on form for better results. ';
+      }
     }
     
     message += `Your total score is ${totalScore} points. `;
     
     const minutes = Math.floor(sessionDuration / 60000);
     const seconds = Math.floor((sessionDuration % 60000) / 1000);
-    message += `Session duration: ${minutes} minutes and ${seconds} seconds. `;
+    message += `Session time: ${minutes} minutes and ${seconds} seconds. `;
     
     if (totalReps >= 10) {
-      message += 'Congratulations on completing all 10 reps!';
+      message += 'Great job completing the full session!';
     } else {
       message += 'Keep practicing to improve your form and complete more reps.';
     }
@@ -212,13 +279,14 @@ export class VoiceFeedbackSystem {
     switch (exerciseName.toLowerCase()) {
       case 'shoulder abduction':
       case 'sky painter':
-        instructions = `Welcome to ${exerciseName}! Stand with your arms at your sides. 
-          Raise your arms out to the sides, keeping them straight, until they reach shoulder level. 
+        instructions = `Welcome to ${exerciseName}! I'll be your guide through this exercise. 
+          Stand with your arms relaxed at your sides. 
+          When you're ready, raise both arms smoothly out to the sides, keeping them straight, until they reach shoulder level. 
           Hold briefly, then slowly lower them back to the starting position. 
-          Complete 10 reps with good form. Let's begin!`;
+          Complete 10 reps with good form. I'll give you feedback along the way. Let's begin!`;
         break;
       default:
-        instructions = `Welcome to ${exerciseName}! Follow the on-screen guidance and complete 10 reps with good form. Let's begin!`;
+        instructions = `Welcome to ${exerciseName}! Follow the on-screen guidance and complete 10 reps with good form. I'll provide feedback to help you improve. Let's begin!`;
     }
     
     this.speak(instructions);

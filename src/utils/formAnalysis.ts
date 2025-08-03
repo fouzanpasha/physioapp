@@ -285,24 +285,152 @@ function getPhaseBasedFeedback(
 ): string {
   const { phase, phaseProgress } = exerciseAnalysis;
 
+  // Get detailed analysis of current form
+  const formIssues = analyzeFormIssues(currentLandmarks, angles, phase);
+  
+  if (formIssues.length > 0) {
+    return formIssues[0]; // Return the most important issue
+  }
+
   switch (phase) {
     case 'rest':
-      return "Start raising your arm to begin the exercise";
+      return "Ready to start! Stand with arms relaxed at your sides.";
     case 'raising':
       if (phaseProgress < 0.3) {
-        return "Continue raising your arm";
+        return "Good start! Continue raising your arms smoothly.";
       } else if (phaseProgress < 0.7) {
-        return "Keep raising your arm to shoulder level";
+        return "Keep going! Raise your arms to shoulder level.";
       } else {
-        return "Almost there! Raise your arm a bit more";
+        return "Almost there! Just a bit higher to reach shoulder level.";
       }
     case 'raised':
-      return "Hold this position with good form";
+      return "Perfect position! Hold briefly, then lower with control.";
     case 'lowering':
-      return "Lower your arm slowly and with control";
+      return "Good control! Lower your arms smoothly back to the starting position.";
     default:
-      return "Check your form alignment";
+      return "Focus on the movement pattern - raise to shoulder level, hold, then lower.";
   }
+}
+
+/**
+ * Analyze specific form issues and provide detailed feedback
+ */
+function analyzeFormIssues(currentLandmarks: any[], angles: any, phase: string): string[] {
+  const issues: string[] = [];
+
+  if (currentLandmarks.length < 6) {
+    return ["Please ensure your full body is visible to the camera."];
+  }
+
+  // Extract key landmarks
+  const rightWrist = currentLandmarks[4];
+  const rightShoulder = currentLandmarks[0];
+  const rightElbow = currentLandmarks[2];
+  const leftWrist = currentLandmarks[5];
+  const leftShoulder = currentLandmarks[1];
+  const leftElbow = currentLandmarks[3];
+
+  // Check if we have valid landmarks
+  if (!rightWrist || !rightShoulder || !leftWrist || !leftShoulder) {
+    return ["Please stand so your shoulders and arms are clearly visible."];
+  }
+
+  // Analyze arm symmetry
+  const rightArmHeight = rightShoulder.y - rightWrist.y;
+  const leftArmHeight = leftShoulder.y - leftWrist.y;
+  const heightDifference = Math.abs(rightArmHeight - leftArmHeight);
+
+  // Check for arm asymmetry (common issue)
+  if (heightDifference > 0.1 && phase !== 'rest') {
+    if (rightArmHeight > leftArmHeight) {
+      issues.push("Your right arm is higher than your left. Try to keep both arms at the same level.");
+    } else {
+      issues.push("Your left arm is higher than your right. Try to keep both arms at the same level.");
+    }
+  }
+
+  // Check arm height relative to shoulders
+  const averageArmHeight = (rightArmHeight + leftArmHeight) / 2;
+  
+  if (phase === 'raised' && averageArmHeight < 0.05) {
+    issues.push("Your arms need to be higher. Your wrists should be at shoulder level, not below.");
+  } else if (phase === 'raising' && averageArmHeight < 0.02) {
+    issues.push("Keep raising your arms. You're not quite at shoulder level yet.");
+  } else if (phase === 'rest' && averageArmHeight > 0.1) {
+    issues.push("Lower your arms completely to the starting position.");
+  }
+
+  // Check for elbow bending (arms should be straight)
+  if (rightElbow && leftElbow) {
+    const rightElbowAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
+    const leftElbowAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
+    
+    if (rightElbowAngle < 160 && phase !== 'rest') {
+      issues.push("Keep your right arm straight. Don't bend your elbow.");
+    }
+    if (leftElbowAngle < 160 && phase !== 'rest') {
+      issues.push("Keep your left arm straight. Don't bend your elbow.");
+    }
+  }
+
+  // Check for shoulder shrugging (shoulders should stay level)
+  const rightHip = currentLandmarks[6];
+  const leftHip = currentLandmarks[7];
+  
+  if (rightHip && leftHip) {
+    const rightShoulderHeight = rightHip.y - rightShoulder.y;
+    const leftShoulderHeight = leftHip.y - leftShoulder.y;
+    const shoulderHeightDiff = Math.abs(rightShoulderHeight - leftShoulderHeight);
+    
+    if (shoulderHeightDiff > 0.05 && phase !== 'rest') {
+      issues.push("Keep your shoulders level. Don't shrug or lift one shoulder higher than the other.");
+    }
+  }
+
+  // Check for body swaying (common compensation)
+  if (rightHip && leftHip) {
+    const hipCenter = (rightHip.x + leftHip.x) / 2;
+    const shoulderCenter = (rightShoulder.x + leftShoulder.x) / 2;
+    const bodyAlignment = Math.abs(hipCenter - shoulderCenter);
+    
+    if (bodyAlignment > 0.1 && phase !== 'rest') {
+      issues.push("Keep your body straight. Don't lean to one side during the movement.");
+    }
+  }
+
+  // Check for wrist positioning (wrists should be neutral)
+  if (rightWrist && rightElbow && leftWrist && leftElbow) {
+    const rightWristAngle = calculateWristAngle(rightElbow, rightWrist);
+    const leftWristAngle = calculateWristAngle(leftElbow, leftWrist);
+    
+    if (Math.abs(rightWristAngle) > 30 && phase !== 'rest') {
+      issues.push("Keep your right wrist straight. Don't bend it up or down.");
+    }
+    if (Math.abs(leftWristAngle) > 30 && phase !== 'rest') {
+      issues.push("Keep your left wrist straight. Don't bend it up or down.");
+    }
+  }
+
+  return issues;
+}
+
+/**
+ * Calculate wrist angle relative to forearm
+ */
+function calculateWristAngle(elbow: any, wrist: any): number {
+  if (!elbow || !wrist) return 0;
+  
+  // Simple wrist angle calculation based on relative positions
+  const forearmVector = {
+    x: wrist.x - elbow.x,
+    y: wrist.y - elbow.y
+  };
+  
+  // Calculate angle relative to horizontal
+  const angle = Math.atan2(forearmVector.y, forearmVector.x) * (180 / Math.PI);
+  
+  // Normalize to -180 to 180 degrees
+  return angle > 180 ? angle - 360 : angle;
 }
 
 /**
